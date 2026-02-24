@@ -17,7 +17,6 @@ export interface Question {
   text: string;
   header?: string;
   choices?: QuestionChoice[];
-  multiSelect: boolean;
   allowOther: boolean;
   instant: boolean;
   context?: string;

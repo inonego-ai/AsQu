@@ -66,7 +66,7 @@ pub struct Question {
     pub text: String,
     pub header: Option<String>,
     pub choices: Option<Vec<QuestionChoice>>,
-    #[serde(rename = "multiSelect")]
+    #[serde(rename = "multiSelect", default)]
     pub multi_select: bool,
     #[serde(rename = "allowOther")]
     pub allow_other: bool,

@@ -24,6 +24,23 @@ export function renderAll() {
   renderInspector();
 }
 
+// Re-render everything except content areas with focusable inputs.
+// Used when the user is typing to avoid destroying the focused input.
+export function renderAllExceptContent() {
+  renderSidebar();
+  renderTabs();
+
+  if (state.activeTab === 'pending') {
+    document.getElementById('view-pending').style.display = 'flex';
+    document.getElementById('view-history').style.display = 'none';
+    renderQuestionTabs();
+  } else {
+    document.getElementById('view-pending').style.display = 'none';
+    document.getElementById('view-history').style.display = 'flex';
+    renderHistory();
+  }
+}
+
 async function init() {
   setupEvents();
   setupContextMenu();

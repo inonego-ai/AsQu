@@ -64,7 +64,7 @@ export function isChoiceMulti(q, idx) {
   if (q.choices && q.choices[idx] && q.choices[idx].multiSelect !== undefined) {
     return q.choices[idx].multiSelect;
   }
-  return q.multiSelect;
+  return false;
 }
 
 export function isChoiceLocked(qId, idx) {

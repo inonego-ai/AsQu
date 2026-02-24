@@ -1,8 +1,17 @@
 # AsQu
 
-**Async Question Queue for Claude Code**
+![usage](usage.gif)
 
-Claude Code's built-in `AskUserQuestion` is blocking — after asking, it waits for your answer and can't do anything else. AsQu replaces that with an async question queue. Claude pushes questions and keeps working; you answer when ready; Claude only blocks when it actually needs the answers.
+**Async Ask Question Queue**
+
+MCP-based async ask question queue that replaces blocking `AskUserQuestion`-style interactions. Instead of waiting for the agent to stop and ask you one question at a time, questions queue up in a desktop app and you answer them at your own pace — no more idle waiting while the agent blocks on your response.
+
+## Usage
+
+Any MCP-compatible AI coding agent can use AsQu:
+
+- **Claude Code** — replaces built-in `AskUserQuestion`
+- **Any MCP client** — standard MCP tools, no vendor lock-in
 
 ## Installation
 
@@ -28,9 +37,9 @@ npm run tauri build
 
 The Tauri binary will be at `app/src-tauri/target/release/asqu.exe`.
 
-### Configure Claude Code
+### Configure MCP
 
-Add to your Claude Code MCP settings (`~/.claude.json` or project `.mcp.json`):
+Add to your MCP settings (e.g. Claude Code `~/.claude.json` or project `.mcp.json`):
 
 ```json
 {
@@ -43,7 +52,7 @@ Add to your Claude Code MCP settings (`~/.claude.json` or project `.mcp.json`):
 }
 ```
 
-That's it. The MCP server auto-launches the Tauri app on first use.
+The MCP server auto-launches the Tauri app on first use.
 
 ## MCP Tools
 
@@ -61,7 +70,6 @@ Push questions to the queue. Returns question IDs immediately.
         { "label": "PostgreSQL", "description": "ACID compliant" },
         { "label": "Redis", "description": "Sub-ms reads", "markdown": "```\nIn-memory key-value store\n```" }
       ],
-      "multiSelect": false,
       "allowOther": true,
       "context": "Need sub-10ms reads, ~100K items",
       "priority": "critical",
@@ -79,12 +87,11 @@ Push questions to the queue. Returns question IDs immediately.
 | `choices[].label` | required | Choice label |
 | `choices[].description` | — | Shown below label |
 | `choices[].markdown` | — | Preview content in inspector panel |
-| `choices[].multiSelect` | — | Override question-level multiSelect for this choice |
-| `multiSelect` | `false` | Allow multiple selections |
+| `choices[].multiSelect` | — | Per-choice multi-select override |
 | `allowOther` | `true` | Include "Other..." free text option |
 | `context` | — | Additional context shown as info block |
 | `priority` | `"normal"` | `critical` / `high` / `normal` / `low` |
-| `instant` | `false` | When `true`, answering immediately unblocks `wait_for_answers` |
+| `instant` | `false` | Instant question (see below) |
 
 ### `wait_for_answers` — Wait for answers (blocking)
 
@@ -117,16 +124,38 @@ Poll for answers without blocking. Same response format as `wait_for_answers`.
 | `ids` | Question IDs to dismiss |
 | `reason` | Optional reason string |
 
-## Usage Pattern
+## Instant Questions
+
+Set `instant: true` on questions where the answer directly unblocks the agent's immediate next step.
+
+**Eager delivery**: Answered instant questions are included as `instant_answers` in ANY tool response — the agent doesn't need to call `wait_for_answers` to receive them.
+
+**Early return from wait**: When `wait_for_answers` is blocking for multiple questions and an instant question gets answered, it returns immediately — even if other questions are still pending.
 
 ```
-Claude:  ask([q1, q2, q3])           -> IDs returned immediately
-Claude:  ... keeps working ...
-Claude:  ... keeps working ...
-Claude:  wait_for_answers([q1, q2])  -> blocks here until user answers
-User:    answers q1, q2 in the app
-Claude:  ... gets answers, continues ...
-Claude:  dismiss_questions([q3])     -> q3 no longer needed
+Agent:  ask(q1), ask(q2), ask(q3_instant)
+Agent:  ... keeps working ...
+Agent:  ask(q4) → response includes instant_answers:[q3 result] if answered
+Agent:  ... or ...
+Agent:  wait_for_answers([q1, q2, q3])
+User:   answers q3 (instant)
+Agent:  ← returns immediately with q3 result + q1,q2 still pending
+Agent:  process q3 answer
+Agent:  wait_for_answers([q1, q2]) → waits for remaining
+```
+
+## Basic Usage Pattern
+
+```
+Agent:  ask(q1)
+Agent:  ask(q2)
+Agent:  ask(q3)
+Agent:  ... keeps working ...
+Agent:  ... keeps working ...
+Agent:  wait_for_answers([q1, q2])  → blocks here until user answers
+User:   answers q1, q2 in the app
+Agent:  ... gets answers, continues ...
+Agent:  dismiss_questions([q3])     → q3 no longer needed
 ```
 
 ## UI

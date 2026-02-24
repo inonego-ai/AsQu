@@ -1,5 +1,10 @@
 import { state } from './state.js';
-import { renderAll } from './app.js';
+import { renderAll, renderAllExceptContent } from './app.js';
+
+function isUserTyping() {
+  const tag = document.activeElement?.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA';
+}
 
 export function setupTauriEvents() {
   if (!window.__TAURI__) return;
@@ -10,16 +15,15 @@ export function setupTauriEvents() {
     state.sessions.set(session.id, session);
     state.questions.set(question.id, question);
     if (!state.activeSessionId) state.activeSessionId = session.id;
-    renderAll();
+    if (isUserTyping()) renderAllExceptContent(); else renderAll();
   });
 
   listen('questions_batch', (event) => {
     const { questions, session } = event.payload;
-    console.log('[AsQu DEBUG] questions_batch payload:', JSON.stringify(questions[0], null, 2));
     state.sessions.set(session.id, session);
     questions.forEach(q => state.questions.set(q.id, q));
     if (!state.activeSessionId) state.activeSessionId = session.id;
-    renderAll();
+    if (isUserTyping()) renderAllExceptContent(); else renderAll();
   });
 
   listen('questions_dismissed', (event) => {

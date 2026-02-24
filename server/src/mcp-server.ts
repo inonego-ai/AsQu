@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { QuestionStore } from "./question-store.js";
 import type { PipeClient } from "./pipe-client.js";
 import { logger } from "./logger.js";
+import { SERVER_INSTRUCTIONS, TOOL_DESCRIPTIONS } from "./instructions.js";
 
 // Strip undefined, null, empty arrays, false from response JSON
 function compact(obj: Record<string, unknown>): Record<string, unknown> {
@@ -17,6 +18,21 @@ function compact(obj: Record<string, unknown>): Record<string, unknown> {
   return result;
 }
 
+// Wrap tool result: append any undelivered instant answers to every response
+function withInstantAnswers(
+  store: QuestionStore,
+  result: Record<string, unknown>,
+  excludeIds?: Set<string>
+): { content: [{ type: "text"; text: string }] } {
+  const instantAnswers = store.collectInstantAnswers(excludeIds);
+  if (instantAnswers.length > 0) {
+    result.instant_answers = instantAnswers;
+  }
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(result) }],
+  };
+}
+
 export function createMcpServer(
   store: QuestionStore,
   pipeClient: PipeClient,
@@ -24,33 +40,51 @@ export function createMcpServer(
   sessionName: string,
   sessionCwd: string
 ): McpServer {
-  const server = new McpServer({
-    name: "AsQu",
-    version: "0.0.1",
-  });
+  const server = new McpServer(
+    {
+      name: "AsQu",
+      version: "0.0.1",
+    },
+    {
+      instructions: SERVER_INSTRUCTIONS,
+    }
+  );
 
   // === Tool 1: ask ===
   server.registerTool(
     "ask",
     {
       title: "Ask Questions",
-      description: `Submit questions to the async queue. Returns question IDs immediately (non-blocking).
-The UI sorts by priority (critical first), so assign higher priority to complex decisions.
-- critical: blocking architectural/design decisions
-- high: important choices that affect multiple components
-- normal: standard questions (default)
-- low: simple confirmations, cosmetic preferences
-
-Omit choices for freeform text input. Set multiSelect=true when multiple choices are valid.`,
+      description: TOOL_DESCRIPTIONS.ask,
       inputSchema: {
         questions: z
-          .array(
-            z.object({
+          .preprocess(
+            (val) => {
+              // Coerce JSON string → array
+              if (typeof val === "string") {
+                try { val = JSON.parse(val); } catch {}
+              }
+              // Remap common field name mistakes per item
+              if (Array.isArray(val)) {
+                return val.map((item: unknown) => {
+                  if (item && typeof item === "object") {
+                    const q = item as Record<string, unknown>;
+                    if (!q.text && (q.question || q.content)) {
+                      q.text = q.question ?? q.content;
+                    }
+                  }
+                  return item;
+                });
+              }
+              return val;
+            },
+            z.array(z.object({
               text: z.string().describe("Question text to display"),
               header: z
-                .string()
-                .max(12)
-                .optional()
+                .preprocess(
+                  (val) => typeof val === "string" && val.length > 12 ? val.slice(0, 12) : val,
+                  z.string().max(12).optional()
+                )
                 .describe("Short label tag (max 12 chars) shown in tab"),
               choices: z
                 .array(
@@ -67,15 +101,11 @@ Omit choices for freeform text input. Set multiSelect=true when multiple choices
                     multiSelect: z
                       .boolean()
                       .optional()
-                      .describe("Override question-level multiSelect for this choice"),
+                      .describe("Allow this choice to be selected alongside others"),
                   })
                 )
                 .optional()
                 .describe("Choice list. Omit for freeform text input"),
-              multiSelect: z
-                .boolean()
-                .default(false)
-                .describe("Allow multiple selections"),
               allowOther: z
                 .boolean()
                 .default(true)
@@ -91,11 +121,12 @@ Omit choices for freeform text input. Set multiSelect=true when multiple choices
               priority: z
                 .enum(["critical", "high", "normal", "low"])
                 .default("normal")
-                .describe("Question priority for UI sorting"),
+                .describe("Question priority — visual indicator shown to user"),
             })
           )
           .min(1)
-          .describe("Array of questions to submit"),
+          .describe("Array of questions to submit")
+          ),
       },
       annotations: {
         readOnlyHint: false,
@@ -123,9 +154,7 @@ Omit choices for freeform text input. Set multiSelect=true when multiple choices
         pending: store.getPendingCount(),
       });
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(result) }],
-      };
+      return withInstantAnswers(store, result);
     }
   );
 
@@ -134,13 +163,13 @@ Omit choices for freeform text input. Set multiSelect=true when multiple choices
     "get_answers",
     {
       title: "Get Answers",
-      description: `Check for answered questions (non-blocking polling).
-Returns current state of specified questions: answered, denied, or still pending.
-Use wait_for_answers instead if you need to block until answers arrive.`,
+      description: TOOL_DESCRIPTIONS.get_answers,
       inputSchema: {
         ids: z
-          .array(z.string())
-          .min(1)
+          .preprocess(
+            (val) => typeof val === "string" ? (() => { try { return JSON.parse(val); } catch { return val; } })() : val,
+            z.array(z.string()).min(1)
+          )
           .describe("Question IDs to check"),
       },
       annotations: {
@@ -152,9 +181,7 @@ Use wait_for_answers instead if you need to block until answers arrive.`,
     },
     async ({ ids }) => {
       const result = compact({ ...store.getAnswers(ids) });
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(result) }],
-      };
+      return withInstantAnswers(store, result);
     }
   );
 
@@ -163,15 +190,13 @@ Use wait_for_answers instead if you need to block until answers arrive.`,
     "wait_for_answers",
     {
       title: "Wait for Answers",
-      description: `Wait for specific question answers (BLOCKING).
-Blocks until answers are available or timeout expires.
-- require_all=true: wait until ALL specified questions are answered/denied
-- require_all=false: return as soon as ANY question is answered/denied
-Returns partial results on timeout with timed_out=true.`,
+      description: TOOL_DESCRIPTIONS.wait_for_answers,
       inputSchema: {
         ids: z
-          .array(z.string())
-          .min(1)
+          .preprocess(
+            (val) => typeof val === "string" ? (() => { try { return JSON.parse(val); } catch { return val; } })() : val,
+            z.array(z.string()).min(1)
+          )
           .describe("Question IDs to wait for"),
         require_all: z
           .boolean()
@@ -198,9 +223,12 @@ Returns partial results on timeout with timed_out=true.`,
         require_all,
         timeout_seconds
       );
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(compact({ ...result })) }],
-      };
+      // Mark instant answers from wait result as delivered (avoid double-report)
+      const answeredIds = new Set(result.answered.map(a => a.id));
+      store.markInstantDelivered(
+        result.answered.filter(a => store.getQuestion(a.id)?.instant).map(a => a.id)
+      );
+      return withInstantAnswers(store, compact({ ...result }), answeredIds);
     }
   );
 
@@ -209,9 +237,7 @@ Returns partial results on timeout with timed_out=true.`,
     "list_questions",
     {
       title: "List Questions",
-      description: `Query the question queue status (non-blocking).
-Filter by status to see pending, answered, dismissed, or denied questions.
-Returns question metadata without full answer details.`,
+      description: TOOL_DESCRIPTIONS.list_questions,
       inputSchema: {
         status: z
           .enum(["pending", "answered", "expired", "dismissed", "denied"])
@@ -227,7 +253,7 @@ Returns question metadata without full answer details.`,
     },
     async ({ status }) => {
       const questions = store.getQuestionsByStatus(status);
-      const result = {
+      const result: Record<string, unknown> = {
         questions: questions.map((q) => compact({
           id: q.id,
           text: q.text,
@@ -239,9 +265,7 @@ Returns question metadata without full answer details.`,
         })),
         total: questions.length,
       };
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(result) }],
-      };
+      return withInstantAnswers(store, result);
     }
   );
 
@@ -250,13 +274,13 @@ Returns question metadata without full answer details.`,
     "dismiss_questions",
     {
       title: "Dismiss Questions",
-      description: `Remove pending questions that are no longer needed (non-blocking).
-Dismissed questions will be removed from the UI and marked as dismissed.
-Only pending questions can be dismissed.`,
+      description: TOOL_DESCRIPTIONS.dismiss_questions,
       inputSchema: {
         ids: z
-          .array(z.string())
-          .min(1)
+          .preprocess(
+            (val) => typeof val === "string" ? (() => { try { return JSON.parse(val); } catch { return val; } })() : val,
+            z.array(z.string()).min(1)
+          )
           .describe("Question IDs to dismiss"),
         reason: z
           .string()
@@ -278,17 +302,10 @@ Only pending questions can be dismissed.`,
         pipeClient.sendDismiss(dismissed, reason);
       }
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(compact({
-              dismissed,
-              notFound: ids.filter((id: string) => !dismissed.includes(id)),
-            })),
-          },
-        ],
-      };
+      return withInstantAnswers(store, compact({
+        dismissed,
+        notFound: ids.filter((id: string) => !dismissed.includes(id)),
+      }));
     }
   );
 

@@ -26,6 +26,7 @@ interface Waiter {
 export class QuestionStore extends EventEmitter {
   private questions = new Map<string, Question>();
   private waiters: Waiter[] = [];
+  private deliveredInstantIds = new Set<string>();
   private idPrefix = timePrefix();
   private idCounter = 0;
 
@@ -35,7 +36,6 @@ export class QuestionStore extends EventEmitter {
       text: string;
       header?: string;
       choices?: { label: string; description?: string; markdown?: string; multiSelect?: boolean }[];
-      multiSelect?: boolean;
       allowOther?: boolean;
       instant?: boolean;
       context?: string;
@@ -48,7 +48,6 @@ export class QuestionStore extends EventEmitter {
       text: params.text,
       header: params.header,
       choices: params.choices,
-      multiSelect: params.multiSelect ?? false,
       allowOther: params.allowOther ?? true,
       instant: params.instant ?? false,
       context: params.context,
@@ -137,6 +136,31 @@ export class QuestionStore extends EventEmitter {
     return Array.from(this.questions.values()).filter(
       (q) => q.status === "pending"
     ).length;
+  }
+
+  // Collect answered instant questions not yet delivered.
+  // Marks them as delivered so they won't be returned again.
+  collectInstantAnswers(excludeIds?: Set<string>): AnswerInfo[] {
+    const results: AnswerInfo[] = [];
+    for (const q of this.questions.values()) {
+      if (
+        q.instant &&
+        q.status === "answered" &&
+        q.answer &&
+        !this.deliveredInstantIds.has(q.id) &&
+        !(excludeIds?.has(q.id))
+      ) {
+        this.deliveredInstantIds.add(q.id);
+        results.push({ id: q.id, text: q.text, answer: q.answer });
+      }
+    }
+    return results;
+  }
+
+  markInstantDelivered(ids: string[]): void {
+    for (const id of ids) {
+      this.deliveredInstantIds.add(id);
+    }
   }
 
   // Non-blocking: check current state of given question IDs
