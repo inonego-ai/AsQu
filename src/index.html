@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AsQu</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="app" id="app">
+  <!-- Titlebar -->
+  <div class="titlebar" data-tauri-drag-region>
+    <div class="titlebar-title">AsQu</div>
+    <div class="titlebar-actions">
+      <button class="titlebar-btn" id="btn-settings" title="Settings" aria-label="Open settings">&#9881;</button>
+      <button class="titlebar-btn" id="btn-minimize" title="Minimize" aria-label="Minimize window">&#8211;</button>
+      <button class="titlebar-btn" id="btn-close" title="Close" aria-label="Close window">&#10005;</button>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div class="main-content">
+    <!-- Question List Sidebar -->
+    <div class="question-sidebar" id="question-sidebar" role="navigation" aria-label="Question list"></div>
+
+    <!-- Center Panel -->
+    <div class="center-panel" role="main">
+      <div id="view-pending" style="display:flex; flex-direction:column; flex:1; overflow:hidden;">
+        <div class="question-area" id="question-area">
+          <div class="empty-state" id="empty-pending">
+            <div class="empty-state-icon">&#10003;</div>
+            <div class="empty-state-text">All caught up! No pending questions.</div>
+          </div>
+        </div>
+        <div class="submit-bar" id="submit-bar" style="display:none;">
+          <button class="btn btn-dismiss" id="btn-dismiss-q" aria-label="Dismiss question">Dismiss</button>
+          <div style="flex:1"></div>
+          <button class="btn btn-primary" id="btn-submit" aria-label="Submit answer">Submit Answer</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Inspector Panel -->
+    <div class="inspector" role="complementary" aria-label="Choice inspector">
+      <div class="inspector-header">Inspector</div>
+      <div class="inspector-empty" id="inspector-empty">Click a choice to inspect</div>
+      <div class="inspector-content" id="inspector-content" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- Status Bar -->
+  <div class="status-bar" role="status" aria-live="polite">
+    <span class="status-dot"></span>
+    <span id="status-pending">Pending: 0</span>
+    <span style="margin-left:auto;">AsQu v0.1.0</span>
+  </div>
+</div>
+
+<!-- Settings Overlay -->
+<div class="settings-overlay" id="settings-overlay" role="dialog" aria-label="Settings" aria-modal="true">
+  <div class="settings-panel anim-scale">
+    <div class="settings-title">Settings</div>
+    <div class="settings-group">
+      <div class="settings-group-title">Appearance</div>
+      <div class="settings-row">
+        <span class="settings-label">Theme</span>
+        <div class="theme-options" id="theme-options">
+          <button class="theme-btn active" data-theme="" title="Dark Blue">
+            <span class="theme-swatch" style="background:#58a6ff;"></span>
+          </button>
+          <button class="theme-btn" data-theme="dark-purple" title="Dark Purple">
+            <span class="theme-swatch" style="background:#8b5cf6;"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div class="settings-actions">
+      <button class="btn btn-secondary" id="btn-settings-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

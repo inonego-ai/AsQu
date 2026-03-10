@@ -1,15 +1,11 @@
-# Dependencies
-node_modules/
+# Backup (reference only)
+_backup/
 
 # Build outputs
-server/build/
-app/src-tauri/target/
+src-tauri/target/
 
 # Tauri generated
-app/src-tauri/gen/
-
-# Lock files (optional - uncomment to track)
-# package-lock.json
+src-tauri/gen/
 
 # OS files
 .DS_Store

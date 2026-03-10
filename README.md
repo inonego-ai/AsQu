@@ -1,173 +1,73 @@
-# AsQu
+<p align="right">
+  <a href="README.ko.md">🇰🇷 한국어</a>
+</p>
 
-![usage](usage.gif)
+<h1 align="center">AsQu</h1>
 
-**Async Ask Question Queue**
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/rust-2024_edition-orange.svg?logo=rust" alt="Rust">
+  <img src="https://img.shields.io/badge/tauri-2-24C8D8.svg?logo=tauri&logoColor=white" alt="Tauri 2">
+  <img src="https://img.shields.io/badge/MCP-compatible-8A2BE2.svg" alt="MCP Compatible">
+</p>
 
-MCP-based async ask question queue that replaces blocking `AskUserQuestion`-style interactions. Instead of waiting for the agent to stop and ask you one question at a time, questions queue up in a desktop app and you answer them at your own pace — no more idle waiting while the agent blocks on your response.
+<p align="center">
+  <b>Async Ask Question Queue for AI coding agents</b><br>
+  Questions queue up in a desktop app — answer at your own pace, no more idle waiting.
+</p>
 
-## Usage
+---
 
-Any MCP-compatible AI coding agent can use AsQu:
+## What is AsQu?
 
-- **Claude Code** — replaces built-in `AskUserQuestion`
-- **Any MCP client** — standard MCP tools, no vendor lock-in
+AsQu is an Async Ask Question Queue for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and other MCP-compatible agents. Instead of the agent blocking on one question at a time, questions accumulate in a desktop UI and you answer them whenever you're ready.
 
 ## Installation
 
 ### Prerequisites
 
-- **Node.js** >= 20
-- **Rust** toolchain ([rustup](https://rustup.rs/))
-- **Windows 11** (Windows Named Pipes; Unix support planned)
+- [Rust](https://rustup.rs/) toolchain (edition 2024)
+- Platform dependencies for [Tauri 2](https://v2.tauri.app/start/prerequisites/)
 
 ### Build
 
 ```bash
-# 1. Build the MCP server
-cd server
-npm install
-npm run build
-
-# 2. Build the Tauri app
-cd ../app
-npm install
-npm run tauri build
+git clone https://github.com/inonego/AsQu.git
+cd AsQu
+cargo tauri build
 ```
 
-The Tauri binary will be at `app/src-tauri/target/release/asqu.exe`.
+The binary will be at `src-tauri/target/release/asqu.exe`.
 
-### Configure MCP
+Copy it to a directory in your `PATH`, or reference the full path in your MCP configuration.
 
-Add to your MCP settings (e.g. Claude Code `~/.claude.json` or project `.mcp.json`):
+## MCP Configuration
+
+Add to your project `.mcp.json` (or `~/.claude.json` for global):
 
 ```json
 {
   "mcpServers": {
-    "AsQu": {
-      "command": "node",
-      "args": ["<path-to-AsQu>/server/build/index.js"]
+    "asqu": {
+      "command": "<path-to>/asqu.exe"
     }
   }
 }
 ```
 
-The MCP server auto-launches the Tauri app on first use.
+The desktop UI launches automatically when the MCP server starts.
 
 ## MCP Tools
 
-### `ask` — Submit questions (non-blocking)
-
-Push questions to the queue. Returns question IDs immediately.
-
-```json
-{
-  "questions": [
-    {
-      "text": "Which database for the session store?",
-      "header": "database",
-      "choices": [
-        { "label": "PostgreSQL", "description": "ACID compliant" },
-        { "label": "Redis", "description": "Sub-ms reads", "markdown": "```\nIn-memory key-value store\n```" }
-      ],
-      "allowOther": true,
-      "context": "Need sub-10ms reads, ~100K items",
-      "priority": "critical",
-      "instant": false
-    }
-  ]
-}
-```
-
-| Field | Default | Description |
-|---|---|---|
-| `text` | required | Question text |
-| `header` | — | Tab label (max 12 chars) |
-| `choices` | — | Choice list. Omit for freeform text input |
-| `choices[].label` | required | Choice label |
-| `choices[].description` | — | Shown below label |
-| `choices[].markdown` | — | Preview content in inspector panel |
-| `choices[].multiSelect` | — | Per-choice multi-select override |
-| `allowOther` | `true` | Include "Other..." free text option |
-| `context` | — | Additional context shown as info block |
-| `priority` | `"normal"` | `critical` / `high` / `normal` / `low` |
-| `instant` | `false` | Instant question (see below) |
-
-### `wait_for_answers` — Wait for answers (blocking)
-
-Block until specific questions are answered.
-
-| Field | Default | Description |
-|---|---|---|
-| `ids` | required | Question IDs to wait for |
-| `require_all` | `true` | `true` = wait for all, `false` = return on first answer |
-| `timeout_seconds` | — | Timeout in seconds (1–3600). Returns partial results with `timed_out: true` on expiry |
-
-### `get_answers` — Check answers (non-blocking)
-
-Poll for answers without blocking. Same response format as `wait_for_answers`.
-
-| Field | Description |
+| Tool | Description |
 |---|---|
-| `ids` | Question IDs to check |
-
-### `list_questions` — Query queue status
-
-| Field | Description |
-|---|---|
-| `status` | Filter: `pending` / `answered` / `dismissed` / `denied` (omit for all) |
-
-### `dismiss_questions` — Remove questions
-
-| Field | Description |
-|---|---|
-| `ids` | Question IDs to dismiss |
-| `reason` | Optional reason string |
-
-## Instant Questions
-
-Set `instant: true` on questions where the answer directly unblocks the agent's immediate next step.
-
-**Eager delivery**: Answered instant questions are included as `instant_answers` in ANY tool response — the agent doesn't need to call `wait_for_answers` to receive them.
-
-**Early return from wait**: When `wait_for_answers` is blocking for multiple questions and an instant question gets answered, it returns immediately — even if other questions are still pending.
-
-```
-Agent:  ask(q1), ask(q2), ask(q3_instant)
-Agent:  ... keeps working ...
-Agent:  ask(q4) → response includes instant_answers:[q3 result] if answered
-Agent:  ... or ...
-Agent:  wait_for_answers([q1, q2, q3])
-User:   answers q3 (instant)
-Agent:  ← returns immediately with q3 result + q1,q2 still pending
-Agent:  process q3 answer
-Agent:  wait_for_answers([q1, q2]) → waits for remaining
-```
-
-## Basic Usage Pattern
-
-```
-Agent:  ask(q1)
-Agent:  ask(q2)
-Agent:  ask(q3)
-Agent:  ... keeps working ...
-Agent:  ... keeps working ...
-Agent:  wait_for_answers([q1, q2])  → blocks here until user answers
-User:   answers q1, q2 in the app
-Agent:  ... gets answers, continues ...
-Agent:  dismiss_questions([q3])     → q3 no longer needed
-```
-
-## UI
-
-Three-column layout: **Sessions** | **Question** | **Inspector**
-
-- **Pending tab**: One question at a time with horizontal tabs for switching
-- **History tab**: Card list of answered/dismissed questions
-- **Inspector panel**: Markdown preview + confidence slider + notes per choice
-- **System tray**: Click to toggle window, tray icon shows pending count
-- **Keyboard**: `Enter` submit, `1-9` quick-select, `←/→` switch questions, `Esc` dismiss
+| `ask` | Submit questions (free-text, single/multi-choice, instant, with category/priority) |
+| `get_answers` | Non-blocking poll for answer status |
+| `wait_for_answers` | Block until answers arrive (supports timeout, require_all) |
+| `list_questions` | List questions filtered by status |
+| `dismiss_questions` | Cancel pending questions |
+| `open_ui` | Show the desktop window |
 
 ## License
 
-MIT
+[MIT](LICENSE)
