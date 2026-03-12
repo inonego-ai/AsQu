@@ -29,17 +29,18 @@ AsQu is an Async Ask Question Queue for [Claude Code](https://docs.anthropic.com
 - [Rust](https://rustup.rs/) toolchain (edition 2024)
 - Platform dependencies for [Tauri 2](https://v2.tauri.app/start/prerequisites/)
 
-### Build
+### Install
 
 ```bash
-git clone https://github.com/inonego/AsQu.git
-cd AsQu
-cargo tauri build
+# 1. Install binary
+cargo install --git https://github.com/inonego/AsQu.git --bin asqu
+
+# 2. Register marketplace
+claude plugin marketplace add inonego/AsQu
+
+# 3. Install plugin
+claude plugin install asqu
 ```
-
-The binary will be at `src-tauri/target/release/asqu.exe`.
-
-Copy it to a directory in your `PATH`, or reference the full path in your MCP configuration.
 
 ## MCP Configuration
 
@@ -49,11 +50,13 @@ Add to your project `.mcp.json` (or `~/.claude.json` for global):
 {
   "mcpServers": {
     "asqu": {
-      "command": "<path-to>/asqu.exe"
+      "command": "asqu"
     }
   }
 }
 ```
+
+> If not installed via `cargo install`, replace `"asqu"` with the full path to the binary.
 
 The desktop UI launches automatically when the MCP server starts.
 

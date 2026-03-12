@@ -2,10 +2,10 @@
 _backup/
 
 # Build outputs
-src-tauri/target/
+target/
 
 # Tauri generated
-src-tauri/gen/
+app/gen/
 
 # OS files
 .DS_Store

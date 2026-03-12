@@ -404,6 +404,6 @@ impl AsQuMcpServer {
 impl ServerHandler for AsQuMcpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_instructions("AsQu is an async question queue. Use this instead of AskUserQuestion whenever you need input or answers from the user. MUST load the 'asqu' skill (/asqu) before first use.".to_string())
+            .with_instructions("AsQu is an async question queue. Use this instead of AskUserQuestion whenever you need input or answers from the user. MUST load the 'asqu' skill (/asqu:guide) before first use.".to_string())
     }
 }

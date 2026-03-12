@@ -1,0 +1,17 @@
+{
+  "name": "asqu",
+  "owner": {
+    "name": "inonego"
+  },
+  "metadata": {
+    "description": "Async question queue — desktop UI for structured user input via MCP"
+  },
+  "plugins": [
+    {
+      "name": "asqu",
+      "source": "./plugin",
+      "description": "Async question queue — desktop UI for structured user input via MCP",
+      "version": "0.1.0"
+    }
+  ]
+}

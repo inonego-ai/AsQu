@@ -1,0 +1,8 @@
+{
+  "name": "asqu",
+  "version": "0.1.0",
+  "description": "Async question queue — desktop UI for structured user input via MCP",
+  "repository": "https://github.com/inonego/AsQu",
+  "license": "MIT",
+  "mcpServers": "./.mcp.json"
+}

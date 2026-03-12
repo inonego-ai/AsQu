@@ -1,8 +1,9 @@
 ---
-name: asqu
+name: guide
 description: >
   Async Ask Question Queue — use instead of AskUserQuestion for all user input/decisions.
   NOT for: plain-text question lists or brainstorming.
+user-invocable: false
 ---
 
 Re-read these instructions and load tools before first use.
