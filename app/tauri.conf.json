@@ -1,6 +1,6 @@
 {
   "productName": "AsQu",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.asqu.app",
   "build": {
     "frontendDist": "./frontend"
@@ -10,7 +10,7 @@
     "windows": [
       {
         "title": "AsQu",
-        "width": 1100,
+        "width": 1300,
         "height": 700,
         "resizable": true,
         "decorations": false,

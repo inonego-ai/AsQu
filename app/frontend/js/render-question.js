@@ -19,9 +19,9 @@ import { renderInspector } from './render-inspector.js';
 // Question List Sidebar (Category-Grouped)
 // ============================================================
 
-// ------------------------------------------------------------
+// -----------------------------------------------------------------------
 // Render the left sidebar with category groups and question items
-// ------------------------------------------------------------
+// -----------------------------------------------------------------------
 export function renderQuestionList() {
   const el = document.getElementById('question-sidebar');
   const groups = getGroupedPendingQuestions();
@@ -45,7 +45,7 @@ export function renderQuestionList() {
       <div class="sidebar-group-header">${esc(catLabel)}</div>`;
 
     for (const q of group.questions) {
-      const label = q.header || q.text.substring(0, 24);
+      const label = q.header || [...q.text].slice(0, 24).join('');
       const color = PRIORITY_COLORS[q.priority] || PRIORITY_COLORS.normal;
       const active = q.id === state.activeQuestionId ? ' active' : '';
 
@@ -269,10 +269,10 @@ function wireTextInputs(q, ans) {
 // Choice Click Handler
 // ============================================================
 
-// ------------------------------------------------------------
+// -----------------------------------------------------------------------
 // Handle selection logic for a clicked choice
 // Supports single-select, multi-select, and locked (pinned) modes
-// ------------------------------------------------------------
+// -----------------------------------------------------------------------
 export function handleChoiceClick(q, idx) {
   const ans = getAnswerState(q.id);
   const locked = isChoiceLocked(q.id, idx);

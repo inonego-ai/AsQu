@@ -12,6 +12,11 @@ export const state = {
   // Per-question answer state:
   // questionId -> { selected: Set<number>, details: Map<number, {confidenceOn, confidence, note}>, text }
   answers: new Map(),
+
+  // Session state
+  sessions: new Map(),       // sessionId -> { id, displayName, createdAt, questionIds }
+  sessionOrder: [],          // session IDs in insertion order
+  activeSessionId: null,     // currently selected session (null = show all)
 };
 
 // ============================================================
@@ -67,17 +72,22 @@ export function timeAgo(ts) {
 
 // ------------------------------------------------------------
 // Get pending questions sorted by creation time
+// Filtered to activeSessionId if one is selected
 // ------------------------------------------------------------
 export function getPendingQuestions() {
   return Array.from(state.questions.values())
-    .filter(q => q.status === 'pending')
+    .filter(q => {
+      if (q.status !== 'pending') return false;
+      if (state.activeSessionId && q.sessionId !== state.activeSessionId) return false;
+      return true;
+    })
     .sort((a, b) => a.createdAt - b.createdAt);
 }
 
-// ------------------------------------------------------------
+// -----------------------------------------------------------------------
 // Group pending questions by category (preserving first-seen order)
 // Returns: [{ category: string|null, questions: Question[] }, ...]
-// ------------------------------------------------------------
+// -----------------------------------------------------------------------
 export function getGroupedPendingQuestions() {
   const pending = getPendingQuestions();
   const groups = new Map();
@@ -121,9 +131,9 @@ export function isMultiSelect(q) {
   return q.multiSelect || false;
 }
 
-// ------------------------------------------------------------
+// -----------------------------------------------------------------------
 // Check if a choice is "locked" (has confidence or notes set)
-// ------------------------------------------------------------
+// -----------------------------------------------------------------------
 export function isChoiceLocked(qId, idx) {
   const ans = getAnswerState(qId);
   const d = ans.details.get(idx);

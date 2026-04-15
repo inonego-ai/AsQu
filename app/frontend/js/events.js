@@ -50,6 +50,7 @@ export async function submitCurrentAnswer() {
     renderAll();
   } catch (err) {
     console.error('Submit failed:', err);
+    renderAll(); // Re-sync UI with actual backend state on failure
   }
 }
 
@@ -65,6 +66,8 @@ export async function dismissCurrentQuestion() {
       await window.__TAURI__.core.invoke('dismiss_question', { questionId: q.id });
     } catch (e) {
       console.error('Failed to dismiss:', e);
+      renderAll(); // Re-sync UI with actual backend state on failure
+      return;
     }
   }
 
@@ -184,11 +187,11 @@ function setupWindowControls() {
 // Keyboard Shortcuts
 // ============================================================
 
-// ------------------------------------------------------------
+// -----------------------------------------------------------------------
 // Global keyboard handler for navigation and quick actions
 // Keys: 1-9 = select choice, Enter = submit, Escape = dismiss,
 //       Arrow left/right or up/down = navigate between questions
-// ------------------------------------------------------------
+// -----------------------------------------------------------------------
 function setupKeyboard() {
   document.addEventListener('keydown', (e) => {
     const q = state.questions.get(state.activeQuestionId);
@@ -242,10 +245,10 @@ function navigateQuestion(direction) {
 // Context Menu (Right-Click)
 // ============================================================
 
-// ------------------------------------------------------------
+// -----------------------------------------------------------------------
 // Block default context menu globally;
 // Show custom menu on choice right-click to toggle multi-select
-// ------------------------------------------------------------
+// -----------------------------------------------------------------------
 function setupContextMenu() {
   // Block browser default context menu everywhere
   document.addEventListener('contextmenu', (e) => {

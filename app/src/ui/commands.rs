@@ -7,7 +7,7 @@ use tauri::{Manager, State};
 
 use std::sync::atomic::Ordering;
 
-use crate::state::{AppState, SharedState, WebviewReadyState};
+use crate::state::{SharedState, WebviewReadyState};
 use crate::types::QuestionAnswer;
 
 // ============================================================
@@ -15,29 +15,16 @@ use crate::types::QuestionAnswer;
 // ============================================================
 
 // ------------------------------------------------------------
-// Hide the window if no pending questions remain
-// ------------------------------------------------------------
-fn auto_hide_if_empty(app: &tauri::AppHandle, st: &AppState) {
-    if st.get_pending_count() == 0 {
-        if let Some(win) = app.get_webview_window("main") {
-            let _ = win.hide();
-        }
-    }
-}
-
-// ------------------------------------------------------------
 // Submit an answer to a question (from UI)
 // ------------------------------------------------------------
 #[tauri::command]
-pub async fn submit_answer(
-    app: tauri::AppHandle,
+pub fn submit_answer(
     state: State<'_, SharedState>,
     question_id: String,
     answer: QuestionAnswer,
 ) -> Result<bool, String> {
-    let mut st = state.lock().await;
+    let mut st = state.lock().unwrap();
     let ok = st.apply_answer(&question_id, answer);
-    auto_hide_if_empty(&app, &st);
     Ok(ok)
 }
 
@@ -45,19 +32,34 @@ pub async fn submit_answer(
 // Dismiss a question from the UI
 // ------------------------------------------------------------
 #[tauri::command]
-pub async fn dismiss_question(
-    app: tauri::AppHandle,
+pub fn dismiss_question(
     state: State<'_, SharedState>,
     question_id: String,
     reason: Option<String>,
 ) -> Result<Vec<String>, String> {
-    let mut st = state.lock().await;
+    let mut st = state.lock().unwrap();
     let dismissed = st.apply_denied(
         &[question_id],
         reason.as_deref().unwrap_or("dismissed by user"),
     );
-    auto_hide_if_empty(&app, &st);
     Ok(dismissed)
+}
+
+// ============================================================
+// Session Management
+// ============================================================
+
+// ------------------------------------------------------------
+// Remove a session and all its questions (from UI X button)
+// ------------------------------------------------------------
+#[tauri::command]
+pub fn remove_session(
+    state: State<'_, SharedState>,
+    session_id: String,
+) -> Result<bool, String> {
+    let mut st = state.lock().unwrap();
+    let ok = st.remove_session_with_questions(&session_id);
+    Ok(ok)
 }
 
 // ============================================================
@@ -68,12 +70,32 @@ pub async fn dismiss_question(
 // Get full application state (for initial load)
 // ------------------------------------------------------------
 #[tauri::command]
-pub async fn get_state(state: State<'_, SharedState>) -> Result<Value, String> {
-    let st = state.lock().await;
-    let questions: Vec<&crate::types::Question> = st.questions.values().collect();
+pub fn get_state(state: State<'_, SharedState>) -> Result<Value, String> {
+    let st = state.lock().unwrap();
+
+    // Return questions in session insertion order, preserving question_ids order
+    let questions: Vec<&crate::types::Question> = st
+        .session_order
+        .iter()
+        .filter_map(|sid| st.sessions.get(sid))
+        .flat_map(|session| {
+            session
+                .question_ids
+                .iter()
+                .filter_map(|qid| st.questions.get(qid))
+        })
+        .collect();
+
+    // Return sessions in insertion order
+    let sessions: Vec<&crate::types::Session> = st
+        .session_order
+        .iter()
+        .filter_map(|id| st.sessions.get(id))
+        .collect();
 
     Ok(serde_json::json!({
         "questions": questions,
+        "sessions": sessions,
     }))
 }
 
@@ -86,16 +108,15 @@ pub async fn get_state(state: State<'_, SharedState>) -> Result<Value, String> {
 // Processes any buffered show requests.
 // ------------------------------------------------------------
 #[tauri::command]
-pub async fn notify_ready(
+pub fn notify_ready(
     app: tauri::AppHandle,
-    ready_state: tauri::State<'_, WebviewReadyState>,
-    flag: tauri::State<'_, crate::state::WindowClosedFlag>,
+    ready_state: State<'_, WebviewReadyState>,
 ) -> Result<(), String> {
     ready_state.ready.store(true, Ordering::Release);
 
     // If a show was requested before the webview was ready, process it now
     if ready_state.pending_show.swap(false, Ordering::AcqRel) {
-        super::window::show_window_internal(&app, &flag.0);
+        super::window::show_window_lazy(&app);
     }
     Ok(())
 }
@@ -108,11 +129,8 @@ pub async fn notify_ready(
 // Show the main window
 // ------------------------------------------------------------
 #[tauri::command]
-pub async fn show_window(
-    app: tauri::AppHandle,
-    flag: tauri::State<'_, crate::state::WindowClosedFlag>,
-) -> Result<(), String> {
-    super::window::show_window_internal(&app, &flag.0);
+pub fn show_window(app: tauri::AppHandle) -> Result<(), String> {
+    super::window::show_window_lazy(&app);
     Ok(())
 }
 
@@ -120,17 +138,9 @@ pub async fn show_window(
 // Hide the main window
 // ------------------------------------------------------------
 #[tauri::command]
-pub async fn hide_window(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, crate::state::SharedState>,
-) -> Result<(), String> {
+pub fn hide_window(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.hide();
     }
-    // Wake blocked wait_for_answers calls
-    let st = state.lock().await;
-    st.window_closed_flag
-        .store(true, std::sync::atomic::Ordering::Release);
-    st.window_closed.notify_waiters();
     Ok(())
 }

@@ -1,59 +1,90 @@
 // ============================================================
-// lib.rs — Tauri setup, MCP integration, event bridge
+// lib.rs — Tauri setup, IPC integration, event bridge
 // ============================================================
 
-mod mcp;
+mod cli;
+mod ipc;
 mod question_store;
 mod state;
 mod types;
 mod ui;
 
-use std::env;
-use std::path::Path;
-use std::sync::{atomic::AtomicBool, Arc};
+#[cfg(test)]
+mod tests;
 
-use tauri::{Emitter, Manager};
-use tokio::sync::Mutex;
+use std::sync::{Arc, Mutex};
+
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Emitter, Manager,
+};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-use state::{AppState, SharedState};
-use types::McpToUiEvent;
+use state::{AppState, SharedState, WebviewReadyState};
+use types::IpcToUiEvent;
 
 // ============================================================
-// UI Event Listener (bridges MCP events to Tauri frontend)
+// Public API
+// ============================================================
+
+pub fn run_gui() {
+    run_tauri();
+}
+
+pub fn run_cli(args: Vec<String>) {
+    cli::run_cli(args);
+}
+
+// ============================================================
+// UI Event Listener (bridges IPC events to Tauri frontend)
 // ============================================================
 
 // ------------------------------------------------------------
-// Listen for MCP -> UI events and emit Tauri events
+// Listen for IPC -> UI events and emit Tauri events
 // ------------------------------------------------------------
 async fn ui_event_listener(
     app: tauri::AppHandle,
-    mut rx: tokio::sync::mpsc::UnboundedReceiver<McpToUiEvent>,
-    close_flag: Arc<AtomicBool>,
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<IpcToUiEvent>,
 ) {
     while let Some(event) = rx.recv().await {
         match event {
-            McpToUiEvent::QuestionAdded { question } => {
+            IpcToUiEvent::QuestionAdded { question } => {
                 let _ = app.emit("question_added", serde_json::json!({
                     "question": question,
                 }));
-                // Show window when a new question arrives
-                ui::window::show_window_internal(&app, &close_flag);
+                ui::window::show_window_lazy(&app);
             }
-            McpToUiEvent::QuestionsBatch { questions } => {
+            IpcToUiEvent::QuestionsBatch { questions } => {
                 let _ = app.emit("questions_batch", serde_json::json!({
                     "questions": questions,
                 }));
-                ui::window::show_window_internal(&app, &close_flag);
+                ui::window::show_window_lazy(&app);
             }
-            McpToUiEvent::QuestionsDismissed { question_ids } => {
+            IpcToUiEvent::QuestionsDismissed { question_ids } => {
                 let _ = app.emit("questions_dismissed", serde_json::json!({
                     "question_ids": question_ids,
                 }));
             }
-            McpToUiEvent::ShowWindow => {
-                ui::window::show_window_internal(&app, &close_flag);
+            IpcToUiEvent::SessionAdded { session } => {
+                let _ = app.emit("session_added", serde_json::json!({
+                    "session": session,
+                }));
+            }
+            IpcToUiEvent::SessionRemoved { session_id, keep_questions } => {
+                let _ = app.emit("session_removed", serde_json::json!({
+                    "session_id": session_id,
+                    "keep_questions": keep_questions,
+                }));
+            }
+            IpcToUiEvent::ShowWindow => {
+                ui::window::show_window_lazy(&app);
+            }
+            IpcToUiEvent::Shutdown => {
+                // Give in-flight wait responses 200ms to reach their callers before exit.
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                app.exit(0);
             }
         }
     }
@@ -61,15 +92,15 @@ async fn ui_event_listener(
 }
 
 // ============================================================
-// Main entry point
+// Tauri application setup
 // ============================================================
 
 // ------------------------------------------------------------
-// Run the application
+// Build and run the Tauri application
 // ------------------------------------------------------------
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    // Initialize logging (to stderr — stdout is used by MCP)
+fn run_tauri() {
+    // Initialize logging (to stderr)
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::from_default_env()
@@ -79,30 +110,20 @@ pub fn run() {
         .with_ansi(false)
         .init();
 
-    info!("AsQu v0.1.0 starting...");
-
-    // Generate session identity
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let session_cwd = env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let session_name = Path::new(&session_cwd)
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "unknown".to_string());
-
-    info!("Session: {session_name} ({session_id})");
+    info!("AsQu starting (GUI mode)...");
 
     // Create shared state
-    let (app_state, mcp_to_ui_rx, close_flag, close_notify) = AppState::new();
+    let (app_state, ipc_to_ui_rx) = AppState::new();
     let shared_state: SharedState = Arc::new(Mutex::new(app_state));
+
+    // Start IPC server (Named Pipe) in background thread
+    ipc::server::start_ipc_server(Arc::clone(&shared_state));
 
     // Build and run Tauri app
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(shared_state.clone())
-        .manage(state::WindowClosedFlag(close_flag.clone()))
-        .manage(state::WebviewReadyState {
+        .manage(WebviewReadyState {
             ready: std::sync::atomic::AtomicBool::new(false),
             pending_show: std::sync::atomic::AtomicBool::new(false),
         })
@@ -113,33 +134,52 @@ pub fn run() {
             ui::commands::notify_ready,
             ui::commands::show_window,
             ui::commands::hide_window,
+            ui::commands::remove_session,
         ])
         .setup(move |app| {
-            // Warm up: briefly show then hide the window.
-            // On Windows, WebView2 may not fully initialize for a window
-            // that was never shown, causing subsequent win.show() to fail.
-            if let Some(win) = app.get_webview_window("main") {
-                let _ = win.show();
-                let _ = win.hide();
-            }
+            // Close handler: hide window instead of exiting
+            ui::window::setup_close_handler(app.handle());
 
-            // Close handler (hide window, MCP server stays running)
-            ui::window::setup_close_handler(app.handle(), close_flag.clone(), close_notify);
+            // System tray: right-click → Quit
+            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(app, &[&quit_item])?;
+            let icon = app.default_window_icon().cloned().unwrap_or_else(|| {
+                tauri::image::Image::new(&[], 0, 0)
+            });
+            TrayIconBuilder::new()
+                .icon(icon)
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| {
+                    if event.id.as_ref() == "quit" {
+                        // Unblock any in-flight wait_for_answers_sync before exiting
+                        if let Some(state) = app.try_state::<SharedState>() {
+                            state.lock().unwrap().begin_shutdown();
+                        }
+                        // Brief pause so CLI wait callers can drain their IPC response
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        app.exit(0);
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    // Left-click: show the window
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        ui::window::show_window_lazy(app);
+                    }
+                })
+                .build(app)?;
 
             // Spawn UI event listener
             let app_handle = app.handle().clone();
-            tauri::async_runtime::spawn(ui_event_listener(app_handle, mcp_to_ui_rx, close_flag));
+            tauri::async_runtime::spawn(ui_event_listener(app_handle, ipc_to_ui_rx));
 
-            // Spawn MCP server on stdio
-            let state_clone = shared_state.clone();
-            let sid = session_id.clone();
-            let sname = session_name.clone();
-            let scwd = session_cwd.clone();
-            tauri::async_runtime::spawn(async move {
-                mcp::transport::start_mcp_server(state_clone, sid, sname, scwd).await;
-            });
-
-            info!("AsQu setup complete");
+            info!("AsQu setup complete — IPC server running on \\\\.\\pipe\\asqu");
             Ok(())
         })
         .run(tauri::generate_context!())

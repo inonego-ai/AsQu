@@ -1,8 +1,7 @@
 {
   "name": "asqu",
-  "version": "0.1.0",
-  "description": "Async question queue — desktop UI for structured user input via MCP",
-  "repository": "https://github.com/inonego/AsQu",
-  "license": "MIT",
-  "mcpServers": "./.mcp.json"
+  "version": "0.2.0",
+  "description": "Async question queue — desktop UI for structured user input via CLI (InoIPC Named Pipe)",
+  "repository": "https://github.com/inonego-ai/AsQu",
+  "license": "MIT"
 }

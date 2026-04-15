@@ -76,7 +76,8 @@ body {
 }
 
 .main-content {
-  display: flex;
+  display: grid;
+  grid-template-columns: 160px 200px 1fr 240px;
   flex: 1;
   overflow: hidden;
 }
@@ -139,14 +140,106 @@ body {
 }
 
 /* ============================================================ */
+/* Session Panel (leftmost column)                               */
+/* ============================================================ */
+
+.session-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--card-border);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px 0;
+}
+
+.session-panel-header {
+  padding: 6px 10px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--subtext);
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: background 0.1s;
+  border-left: 2px solid transparent;
+}
+
+.session-item:hover {
+  background: var(--card-bg);
+}
+
+.session-item.active {
+  background: var(--card-bg);
+  border-left-color: var(--accent);
+}
+
+.session-item-name {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-item-count {
+  font-size: 10px;
+  color: var(--subtext);
+  font-family: var(--mono);
+  flex-shrink: 0;
+}
+
+.session-close {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--subtext);
+  font-size: 10px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s, background 0.1s, color 0.1s;
+  padding: 0;
+  line-height: 1;
+}
+
+.session-item:hover .session-close {
+  opacity: 0.5;
+}
+
+.session-close:hover {
+  opacity: 1 !important;
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--critical);
+}
+
+.session-panel-empty {
+  padding: 20px 10px;
+  font-size: 11px;
+  color: var(--subtext);
+  text-align: center;
+}
+
+/* ============================================================ */
 /* Question List Sidebar                                         */
 /* ============================================================ */
 
 .question-sidebar {
   display: flex;
   flex-direction: column;
-  width: 200px;
-  min-width: 200px;
   background: var(--sidebar-bg);
   border-right: 1px solid var(--card-border);
   overflow-y: auto;
@@ -570,8 +663,8 @@ body {
 .inspector {
   display: flex;
   flex-direction: column;
-  width: 280px;
-  min-width: 280px;
+  width: 240px;
+  min-width: 240px;
   background: var(--sidebar-bg);
   border-left: 1px solid var(--card-border);
   overflow-x: hidden;

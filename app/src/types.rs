@@ -2,14 +2,13 @@
 // types.rs — Core data types for AsQu
 // ============================================================
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 // ============================================================
 // Enums
 // ============================================================
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Priority {
     Critical,
@@ -24,7 +23,7 @@ impl Default for Priority {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum QuestionStatus {
     Pending,
@@ -44,16 +43,13 @@ pub struct QuestionChoice {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub markdown: Option<String>,
 }
 
 // ============================================================
 // Selection Detail (per-choice metadata from the user)
 // ============================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SelectionDetail {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -67,7 +63,7 @@ pub struct SelectionDetail {
 // Answer
 // ============================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QuestionAnswer {
     /// Selected choice indices with optional details (key = index string)
@@ -127,29 +123,42 @@ pub struct Question {
     pub dismiss_reason: Option<String>,
 }
 
-fn default_true() -> bool {
+pub(crate) fn default_true() -> bool {
     true
 }
 
 // ============================================================
-// MCP Tool Result Types
+// Session
 // ============================================================
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Session {
+    pub id: String,
+    pub display_name: String,
+    pub created_at: u64,
+    pub question_ids: Vec<String>,
+}
+
+// ============================================================
+// Answer result types (shared between IPC handlers and UI)
+// ============================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AnswerInfo {
     pub id: String,
     pub answer: QuestionAnswer,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeniedInfo {
     pub id: String,
     pub reason: String,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetAnswersResult {
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
@@ -163,123 +172,17 @@ pub struct GetAnswersResult {
 
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub timed_out: bool,
-}
 
-// ============================================================
-// MCP Tool Response Types (for structured output schemas)
-// ============================================================
-
-/// Response from the `ask` tool
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AskResponse {
-    /// IDs of the newly created questions
-    pub ids: Vec<String>,
-
-    /// Total number of pending questions
-    pub pending: usize,
-
-    /// Instant answers delivered with this response
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub instant_answers: Vec<AnswerInfo>,
-}
-
-/// Response from the `get_answers` and `wait_for_answers` tools
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AnswersResponse {
-    /// Questions that have been answered
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub answered: Vec<AnswerInfo>,
-
-    /// Questions that were denied by the user
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub denied: Vec<DeniedInfo>,
-
-    /// Question IDs still pending
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub pending: Vec<String>,
-
-    /// Whether the wait timed out
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
-    pub timed_out: bool,
-
-    /// Instant answers delivered with this response
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub instant_answers: Vec<AnswerInfo>,
-}
-
-impl AnswersResponse {
-    pub fn from_result(result: GetAnswersResult, instant: Vec<AnswerInfo>) -> Self {
-        Self {
-            answered: result.answered,
-            denied: result.denied,
-            pending: result.pending,
-            timed_out: result.timed_out,
-            instant_answers: instant,
-        }
-    }
-}
-
-/// Question summary for the `list_questions` tool
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct QuestionSummary {
-    pub id: String,
-    pub text: String,
-    pub status: QuestionStatus,
-    pub created_at: u64,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub header: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub priority: Option<Priority>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub answered_at: Option<u64>,
-}
-
-/// Response from the `list_questions` tool
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ListQuestionsResponse {
-    pub questions: Vec<QuestionSummary>,
-    pub total: usize,
-
-    /// Instant answers delivered with this response
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub instant_answers: Vec<AnswerInfo>,
-}
-
-/// Response from the `dismiss_questions` tool
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct DismissResponse {
-    /// IDs of successfully dismissed questions
-    pub dismissed: Vec<String>,
-
-    /// IDs that were not found or not pending
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub not_found: Vec<String>,
-
-    /// Instant answers delivered with this response
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub instant_answers: Vec<AnswerInfo>,
-}
-
-/// Response from the `open_ui` tool
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct OpenUiResponse {
-    pub ok: bool,
+    pub shutdown: bool,
 }
 
 // ============================================================
-// Events (MCP -> UI)
+// Events (IPC -> UI)
 // ============================================================
 
 #[derive(Debug)]
-pub enum McpToUiEvent {
+pub enum IpcToUiEvent {
     QuestionAdded {
         question: Question,
     },
@@ -289,5 +192,16 @@ pub enum McpToUiEvent {
     QuestionsDismissed {
         question_ids: Vec<String>,
     },
+    SessionAdded {
+        session: Session,
+    },
+    SessionRemoved {
+        session_id: String,
+        /// true  = auto-cleanup (questions kept in memory for in-flight wait/get)
+        /// false = explicit removal (X button), questions should be discarded
+        keep_questions: bool,
+    },
     ShowWindow,
+    /// Graceful shutdown: wait for in-flight responses to drain, then exit.
+    Shutdown,
 }

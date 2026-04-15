@@ -52,6 +52,44 @@ export function setupTauriEvents() {
     });
     renderAll();
   });
+
+  // A new session was registered by the IPC server
+  listen('session_added', (event) => {
+    const { session } = event.payload;
+    state.sessions.set(session.id, session);
+    if (!state.sessionOrder.includes(session.id)) {
+      state.sessionOrder.push(session.id);
+    }
+    if (!state.activeSessionId) {
+      state.activeSessionId = session.id;
+    }
+    renderAll();
+  });
+
+  // A session was removed.
+  // keep_questions=true: auto-cleanup (in-flight wait/get may still need the data)
+  // keep_questions=false: explicit X-button removal, discard question data too
+  listen('session_removed', (event) => {
+    const { session_id, keep_questions } = event.payload;
+    if (!keep_questions) {
+      // Filter by sessionId directly — session.questionIds is stale
+      // (captured at session_added time, before questions were added).
+      for (const [qid, q] of state.questions.entries()) {
+        if (q.sessionId === session_id) {
+          state.questions.delete(qid);
+          state.answers.delete(qid);
+        }
+      }
+    }
+    state.sessions.delete(session_id);
+    state.sessionOrder = state.sessionOrder.filter(id => id !== session_id);
+    if (state.activeSessionId === session_id) {
+      state.activeSessionId = state.sessionOrder[0] ?? null;
+      state.activeQuestionId = null;
+      state.focusedChoiceIdx = null;
+    }
+    renderAll();
+  });
 }
 
 // ============================================================
@@ -69,6 +107,17 @@ export async function loadInitialState() {
 
     if (data.questions) {
       data.questions.forEach(q => state.questions.set(q.id, q));
+    }
+    if (data.sessions) {
+      data.sessions.forEach(s => {
+        state.sessions.set(s.id, s);
+        if (!state.sessionOrder.includes(s.id)) {
+          state.sessionOrder.push(s.id);
+        }
+      });
+      if (!state.activeSessionId && state.sessionOrder.length > 0) {
+        state.activeSessionId = state.sessionOrder[0];
+      }
     }
   } catch (err) {
     console.error('Failed to load initial state:', err);

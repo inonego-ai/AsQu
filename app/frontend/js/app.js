@@ -5,6 +5,7 @@
 import { getPendingQuestions } from './state.js';
 import { renderQuestionList, renderQuestionContent } from './render-question.js';
 import { renderInspector } from './render-inspector.js';
+import { renderSessionPanel } from './session-panel.js';
 import { setupEvents } from './events.js';
 import { setupTauriEvents, loadInitialState } from './tauri-bridge.js';
 
@@ -12,23 +13,35 @@ import { setupTauriEvents, loadInitialState } from './tauri-bridge.js';
 // Render Functions
 // ============================================================
 
-// ------------------------------------------------------------
-// Full re-render of all UI panels
-// ------------------------------------------------------------
+// -----------------------------------------------------------------------
+// Full re-render of all UI panels (debounced — coalesces rapid calls)
+// -----------------------------------------------------------------------
+let _renderTimer = null;
 export function renderAll() {
-  renderQuestionList();
-  renderQuestionContent();
-  renderInspector();
-  renderStatusBar();
+  if (_renderTimer) return;
+  _renderTimer = requestAnimationFrame(() => {
+    _renderTimer = null;
+    renderSessionPanel();
+    renderQuestionList();
+    renderQuestionContent();
+    renderInspector();
+    renderStatusBar();
+  });
 }
 
 // ------------------------------------------------------------
 // Partial render that preserves focused inputs (e.g. textarea)
 // Used when user is actively typing to avoid destroying focus
 // ------------------------------------------------------------
+let _renderExceptTimer = null;
 export function renderAllExceptContent() {
-  renderQuestionList();
-  renderStatusBar();
+  if (_renderExceptTimer) return;
+  _renderExceptTimer = requestAnimationFrame(() => {
+    _renderExceptTimer = null;
+    renderSessionPanel();
+    renderQuestionList();
+    renderStatusBar();
+  });
 }
 
 // ------------------------------------------------------------
@@ -48,6 +61,7 @@ function renderStatusBar() {
 // Bootstrap the application
 // ------------------------------------------------------------
 async function init() {
+  window.addEventListener('asqu:render-all', () => renderAll());
   setupEvents();
   setupTauriEvents();
   await loadInitialState();

@@ -1,6 +1,7 @@
 // ============================================================
-// mcp/mod.rs — MCP server module root
+// ipc/mod.rs — IPC module (Named Pipe server + handlers + types)
 // ============================================================
 
-pub mod tools;
-pub mod transport;
+pub mod handlers;
+pub mod server;
+pub mod types;

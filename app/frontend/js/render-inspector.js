@@ -9,10 +9,10 @@ import { renderQuestionContent } from './render-question.js';
 // Inspector Rendering
 // ============================================================
 
-// ------------------------------------------------------------
+// -----------------------------------------------------------------------
 // Render the inspector panel for the currently focused choice
-// Shows preview (markdown), confidence toggle + slider, and notes
-// ------------------------------------------------------------
+// Shows confidence toggle + slider, and notes
+// -----------------------------------------------------------------------
 export function renderInspector() {
   const emptyEl = document.getElementById('inspector-empty');
   const contentEl = document.getElementById('inspector-content');
@@ -37,16 +37,6 @@ export function renderInspector() {
 
   // Choice name header
   let html = `<div class="inspector-choice-name">&#9656; ${esc(choice.label)}</div>`;
-
-  // Preview section (rendered if the choice has markdown content)
-  if (choice.markdown) {
-    html += `<div class="inspector-section">
-      <div class="inspector-section-header">Preview</div>
-      <div class="inspector-section-body">
-        <div class="preview-content">${esc(choice.markdown)}</div>
-      </div>
-    </div>`;
-  }
 
   // Details section: confidence toggle, slider, notes
   const confVal = detail.confidenceOn ? (detail.confidence ?? 100) : null;
@@ -93,9 +83,9 @@ export function renderInspector() {
 // Inspector Event Wiring
 // ============================================================
 
-// ------------------------------------------------------------
+// -----------------------------------------------------------------------
 // Attach interactive handlers for confidence and note controls
-// ------------------------------------------------------------
+// -----------------------------------------------------------------------
 function wireInspectorEvents(q, idx, ans, detail) {
   // Toggle confidence on/off
   document.getElementById('conf-toggle')?.addEventListener('click', () => {
@@ -137,9 +127,9 @@ function wireInspectorEvents(q, idx, ans, detail) {
 // Auto-Selection Logic
 // ============================================================
 
-// ------------------------------------------------------------
+// -----------------------------------------------------------------------
 // Auto-select a choice when details are added; deselect when cleared
-// ------------------------------------------------------------
+// -----------------------------------------------------------------------
 function autoSelectIfDetailed(q, idx) {
   const ans = getAnswerState(q.id);
   if (isChoiceLocked(q.id, idx)) {
@@ -154,9 +144,9 @@ function autoSelectIfDetailed(q, idx) {
 // Textarea Auto-Resize
 // ============================================================
 
-// ------------------------------------------------------------
+// -----------------------------------------------------------------------
 // Resize a textarea to fit its content, up to 200px max height
-// ------------------------------------------------------------
+// -----------------------------------------------------------------------
 function autoResizeTextarea(el) {
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 200) + 'px';

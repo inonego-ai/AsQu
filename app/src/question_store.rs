@@ -1,61 +1,159 @@
 // ============================================================
-// question_store.rs — Question lifecycle and waiter queue
+// question_store.rs — Question and session lifecycle
 // ============================================================
 //
 // All question mutations happen through AppState (behind SharedState Mutex).
-// The wait_for_answers function is a free async fn that releases the Mutex
-// while waiting on Notify, avoiding deadlocks.
+// wait_for_answers_sync is a free blocking function that releases the Mutex
+// between checks, using a Condvar generation counter to avoid missed wakeups.
 // ============================================================
 
-use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use tokio::sync::Notify;
-
-use crate::state::{now_millis, SharedState};
+use crate::ipc::types::AskItem;
+use crate::state::{now_millis, AppState, SharedState};
 use crate::types::{
-    AnswerInfo, DeniedInfo, GetAnswersResult, McpToUiEvent, Priority, Question,
-    QuestionAnswer, QuestionStatus,
+    AnswerInfo, DeniedInfo, GetAnswersResult, IpcToUiEvent, Question, QuestionAnswer,
+    QuestionStatus, Session,
 };
+
+// ============================================================
+// Session Operations (on AppState, called with Mutex held)
+// ============================================================
+
+impl AppState {
+    // ------------------------------------------------------------
+    // Ensure a session exists; create it if not. Returns display_name.
+    // ------------------------------------------------------------
+    pub fn ensure_session(&mut self, session_id: &str) -> String {
+        if !self.sessions.contains_key(session_id) {
+            let display_name = derive_display_name(session_id);
+            let session = Session {
+                id: session_id.to_string(),
+                display_name: display_name.clone(),
+                created_at: now_millis(),
+                question_ids: Vec::new(),
+            };
+            self.sessions.insert(session_id.to_string(), session.clone());
+            self.session_order.push(session_id.to_string());
+            let _ = self.ipc_to_ui_tx.send(IpcToUiEvent::SessionAdded { session });
+            display_name
+        } else {
+            self.sessions[session_id].display_name.clone()
+        }
+    }
+
+    // ------------------------------------------------------------
+    // Remove a session from the UI panel.
+    // Questions are intentionally kept in state.questions so that
+    // in-flight wait/get calls can still read their answers.
+    // ------------------------------------------------------------
+    pub fn remove_session(&mut self, session_id: &str) -> bool {
+        if self.sessions.remove(session_id).is_none() {
+            return false;
+        }
+        self.session_order.retain(|id| id != session_id);
+
+        let _ = self.ipc_to_ui_tx.send(IpcToUiEvent::SessionRemoved {
+            session_id: session_id.to_string(),
+            keep_questions: true,
+        });
+        true
+    }
+
+    // ------------------------------------------------------------
+    // Remove a session AND its questions (explicit UI X-button).
+    // Should not be used for auto-cleanup — only for manual removal.
+    // ------------------------------------------------------------
+    pub fn remove_session_with_questions(&mut self, session_id: &str) -> bool {
+        if self.sessions.remove(session_id).is_none() {
+            return false;
+        };
+        self.session_order.retain(|id| id != session_id);
+
+        // Dismiss pending questions so wait_for_answers_sync unblocks immediately.
+        // Questions are kept in state (not deleted) for in-flight wait callers.
+        let pending_ids: Vec<String> = self.questions
+            .values()
+            .filter(|q| q.session_id == session_id && q.status == QuestionStatus::Pending)
+            .map(|q| q.id.clone())
+            .collect();
+        self.dismiss_questions(&pending_ids, Some("session removed"));
+
+        let _ = self.ipc_to_ui_tx.send(IpcToUiEvent::SessionRemoved {
+            session_id: session_id.to_string(),
+            keep_questions: false,
+        });
+        true
+    }
+
+    // ------------------------------------------------------------
+    // Remove sessions where every question has been consumed
+    // (answered, dismissed, or denied — nothing pending remains)
+    // Called automatically after any state-changing operation.
+    // ------------------------------------------------------------
+    fn cleanup_consumed_sessions(&mut self) {
+        let consumed: Vec<String> = self.session_order
+            .iter()
+            .filter(|sid| {
+                if let Some(session) = self.sessions.get(*sid) {
+                    !session.question_ids.is_empty()
+                        && session.question_ids.iter().all(|qid| {
+                            self.questions
+                                .get(qid)
+                                .map(|q| q.status != QuestionStatus::Pending)
+                                .unwrap_or(true)
+                        })
+                } else {
+                    false
+                }
+            })
+            .cloned()
+            .collect();
+
+        for sid in consumed {
+            self.remove_session(&sid);
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Derive a short display name from a session ID
+// ------------------------------------------------------------
+fn derive_display_name(session_id: &str) -> String {
+    let chars: Vec<char> = session_id.chars().collect();
+    if chars.len() <= 12 {
+        return session_id.to_string();
+    }
+    // Use last 8 characters as the display name (char-safe, handles multibyte)
+    chars[chars.len() - 8..].iter().collect()
+}
 
 // ============================================================
 // Question Operations (on AppState, called with Mutex held)
 // ============================================================
 
-use crate::state::AppState;
-
 impl AppState {
     // ------------------------------------------------------------
-    // Add a new question
+    // Add a question to a session (ensures session exists)
     // ------------------------------------------------------------
-    pub fn add_question(
-        &mut self,
-        session_id: &str,
-        text: String,
-        header: Option<String>,
-        choices: Option<Vec<crate::types::QuestionChoice>>,
-        allow_other: bool,
-        multi_select: bool,
-        instant: bool,
-        context: Option<String>,
-        category: Option<String>,
-        priority: Priority,
-    ) -> Question {
+    pub fn add_question_to_session(&mut self, session_id: &str, item: AskItem) -> Question {
+        self.ensure_session(session_id);
+
         let id = self.next_id();
 
         let question = Question {
             id: id.clone(),
             session_id: session_id.to_string(),
-            text,
-            header,
-            choices,
-            allow_other,
-            multi_select,
-            instant,
-            context,
-            category,
-            priority,
+            text: item.text,
+            header: item.header,
+            choices: item.choices,
+            allow_other: item.allow_other,
+            multi_select: item.multi_select,
+            instant: item.instant,
+            context: item.context,
+            category: item.category,
+            priority: item.priority,
             status: QuestionStatus::Pending,
             created_at: now_millis(),
             answered_at: None,
@@ -63,7 +161,12 @@ impl AppState {
             dismiss_reason: None,
         };
 
-        self.questions.insert(id, question.clone());
+        self.questions.insert(id.clone(), question.clone());
+
+        if let Some(session) = self.sessions.get_mut(session_id) {
+            session.question_ids.push(id);
+        }
+
         question
     }
 
@@ -82,7 +185,8 @@ impl AppState {
         question.answered_at = Some(now_millis());
         question.answer = Some(answer);
 
-        self.state_changed.notify_waiters();
+        self.notify_state_changed();
+        self.cleanup_consumed_sessions();
         true
     }
 
@@ -101,13 +205,14 @@ impl AppState {
             }
         }
         if !denied.is_empty() {
-            self.state_changed.notify_waiters();
+            self.notify_state_changed();
+            self.cleanup_consumed_sessions();
         }
         denied
     }
 
     // ------------------------------------------------------------
-    // Dismiss questions (by MCP client)
+    // Dismiss questions (by IPC client)
     // ------------------------------------------------------------
     pub fn dismiss_questions(
         &mut self,
@@ -125,12 +230,11 @@ impl AppState {
             }
         }
         if !dismissed.is_empty() {
-            self.state_changed.notify_waiters();
-
-            // Emit UI event
-            let _ = self.mcp_to_ui_tx.send(McpToUiEvent::QuestionsDismissed {
+            self.notify_state_changed();
+            let _ = self.ipc_to_ui_tx.send(IpcToUiEvent::QuestionsDismissed {
                 question_ids: dismissed.clone(),
             });
+            self.cleanup_consumed_sessions();
         }
         dismissed
     }
@@ -156,7 +260,9 @@ impl AppState {
                         });
                     }
                 }
-                QuestionStatus::Denied => {
+                // Both Denied (UI dismiss button) and Dismissed (IPC dismiss command)
+                // are returned as denied — the caller's question was cancelled either way.
+                QuestionStatus::Denied | QuestionStatus::Dismissed => {
                     denied.push(DeniedInfo {
                         id: q.id.clone(),
                         reason: q.dismiss_reason.clone().unwrap_or_default(),
@@ -165,7 +271,6 @@ impl AppState {
                 QuestionStatus::Pending => {
                     pending.push(q.id.clone());
                 }
-                _ => {}
             }
         }
 
@@ -174,17 +279,40 @@ impl AppState {
             denied,
             pending,
             timed_out: false,
+            shutdown: false,
         }
     }
 
     // ------------------------------------------------------------
-    // Get questions filtered by status
+    // Get all question IDs belonging to a session
     // ------------------------------------------------------------
-    pub fn get_questions_by_status(&self, status: Option<QuestionStatus>) -> Vec<&Question> {
-        self.questions
+    pub fn get_session_question_ids(&self, session_id: &str) -> Vec<String> {
+        self.sessions
+            .get(session_id)
+            .map(|s| s.question_ids.clone())
+            .unwrap_or_default()
+    }
+
+    // ------------------------------------------------------------
+    // Resolve question IDs (caller holds the lock).
+    // Uses provided ids if non-empty; falls back to session question_ids;
+    // then falls back to searching questions by session_id field.
+    // ------------------------------------------------------------
+    pub fn resolve_question_ids(&self, session_id: &str, ids: Vec<String>) -> Vec<String> {
+        if !ids.is_empty() {
+            return ids;
+        }
+        let from_session = self.get_session_question_ids(session_id);
+        if !from_session.is_empty() {
+            return from_session;
+        }
+        let mut fallback: Vec<String> = self.questions
             .values()
-            .filter(|q| status.is_none() || Some(q.status) == status)
-            .collect()
+            .filter(|q| q.session_id == session_id)
+            .map(|q| q.id.clone())
+            .collect();
+        fallback.sort();
+        fallback
     }
 
     // ------------------------------------------------------------
@@ -198,157 +326,130 @@ impl AppState {
     }
 
     // ------------------------------------------------------------
-    // Collect undelivered instant answers
-    // ------------------------------------------------------------
-    pub fn collect_instant_answers(&mut self, exclude_ids: Option<&HashSet<String>>) -> Vec<AnswerInfo> {
-        let mut results = Vec::new();
-        for q in self.questions.values() {
-            if q.instant
-                && q.status == QuestionStatus::Answered
-                && q.answer.is_some()
-                && !self.delivered_instant_ids.contains(&q.id)
-                && !exclude_ids.map_or(false, |ex| ex.contains(&q.id))
-            {
-                self.delivered_instant_ids.insert(q.id.clone());
-                results.push(AnswerInfo {
-                    id: q.id.clone(),
-                    answer: q.answer.clone().unwrap(),
-                });
-            }
-        }
-        results
-    }
-
-    // ------------------------------------------------------------
-    // Mark instant answers as delivered
-    // ------------------------------------------------------------
-    pub fn mark_instant_delivered(&mut self, ids: &[String]) {
-        for id in ids {
-            self.delivered_instant_ids.insert(id.clone());
-        }
-    }
-
-    // ------------------------------------------------------------
-    // Emit MCP -> UI event for new question(s)
+    // Emit IPC -> UI event for new question(s)
     // ------------------------------------------------------------
     pub fn emit_question_added(&self, question: &Question) {
-        let _ = self.mcp_to_ui_tx.send(McpToUiEvent::QuestionAdded {
+        let _ = self.ipc_to_ui_tx.send(IpcToUiEvent::QuestionAdded {
             question: question.clone(),
         });
     }
 
     pub fn emit_questions_batch(&self, questions: &[Question]) {
-        let _ = self.mcp_to_ui_tx.send(McpToUiEvent::QuestionsBatch {
+        let _ = self.ipc_to_ui_tx.send(IpcToUiEvent::QuestionsBatch {
             questions: questions.to_vec(),
         });
     }
 }
 
 // ============================================================
-// Blocking Wait (free async function — releases Mutex)
+// Blocking Wait (free sync function — releases Mutex between checks)
 // ============================================================
 
 // ------------------------------------------------------------
-// Check if a wait condition is resolved
+// Check if a wait condition is resolved.
+// An instant question being answered always resolves the wait,
+// regardless of require_all — it signals a blocking decision was made.
 // ------------------------------------------------------------
-fn is_resolved(result: &GetAnswersResult, require_all: bool, state: &AppState) -> bool {
-    let all_done = result.pending.is_empty();
-    let any_done = !result.answered.is_empty() || !result.denied.is_empty();
-
-    // Instant questions resolve require_all early
-    let instant_done = result.answered.iter().any(|a| {
-        state.questions.get(&a.id).map_or(false, |q| q.instant)
-    }) || result.denied.iter().any(|d| {
-        state.questions.get(&d.id).map_or(false, |q| q.instant)
-    });
+fn is_resolved(
+    result: &GetAnswersResult,
+    require_all: bool,
+    questions: &std::collections::HashMap<String, crate::types::Question>,
+) -> bool {
+    // If any answered question is marked instant, resolve immediately
+    if result.answered.iter().any(|a| {
+        questions.get(&a.id).map(|q| q.instant).unwrap_or(false)
+    }) {
+        return true;
+    }
 
     if require_all {
-        all_done || instant_done
+        result.pending.is_empty()
     } else {
-        any_done
+        !result.answered.is_empty() || !result.denied.is_empty()
     }
 }
 
 // ------------------------------------------------------------
-// Wait for answers with optional timeout
-// Releases Mutex while blocking on Notify.
+// Wait for answers with optional timeout.
+// Uses Condvar generation counter to avoid missed wakeups.
+// Safe to call from std::thread (does not require tokio runtime).
 // ------------------------------------------------------------
-pub async fn wait_for_answers(
+pub fn wait_for_answers_sync(
     shared: &SharedState,
-    question_ids: Vec<String>,
+    question_ids: &[String],
     require_all: bool,
-    timeout_seconds: Option<u64>,
+    timeout_secs: Option<u64>,
 ) -> GetAnswersResult {
-    // First check: already resolved?
-    let state_notify: Arc<Notify>;
-    let close_notify: Arc<Notify>;
-    let close_flag: Arc<AtomicBool>;
-    {
-        let state = shared.lock().await;
-        let result = state.get_answers(&question_ids);
-        if is_resolved(&result, require_all, &state) {
-            return result;
-        }
-        // Check if window was already closed before we started waiting
-        if state.window_closed_flag.load(Ordering::Acquire) {
-            return result;
-        }
-        state_notify = state.state_changed.clone();
-        close_notify = state.window_closed.clone();
-        close_flag = state.window_closed_flag.clone();
-    }
+    let deadline = timeout_secs.map(|s| Instant::now() + Duration::from_secs(s));
 
-    // Wait loop — Mutex is NOT held during await
-    let deadline = timeout_seconds.map(|s| {
-        std::time::Instant::now() + std::time::Duration::from_secs(s)
-    });
+    // Capture Arc<(Mutex<u64>, Condvar)> while holding AppState lock
+    let state_changed = {
+        let state = shared.lock().unwrap();
+        let result = state.get_answers(question_ids);
+        if is_resolved(&result, require_all, &state.questions) {
+            return result;
+        }
+        Arc::clone(&state.state_changed)
+    };
 
     loop {
-        // Check persistent flag before creating futures (catches missed Notify)
-        if close_flag.load(Ordering::Acquire) {
-            let state = shared.lock().await;
-            return state.get_answers(&question_ids);
-        }
-
-        let state_future = state_notify.notified();
-        let close_future = close_notify.notified();
-
-        if let Some(deadline) = deadline {
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            if remaining.is_zero() {
-                let state = shared.lock().await;
-                let mut result = state.get_answers(&question_ids);
+        // Timeout check
+        if let Some(d) = deadline {
+            if Instant::now() >= d {
+                let state = shared.lock().unwrap();
+                let mut result = state.get_answers(question_ids);
                 result.timed_out = true;
                 return result;
             }
-            tokio::select! {
-                _ = state_future => {}
-                _ = close_future => {
-                    let state = shared.lock().await;
-                    return state.get_answers(&question_ids);
-                }
-                _ = tokio::time::sleep(remaining) => {
-                    let state = shared.lock().await;
-                    let mut result = state.get_answers(&question_ids);
-                    result.timed_out = true;
-                    return result;
-                }
-            }
-        } else {
-            tokio::select! {
-                _ = state_future => {}
-                _ = close_future => {
-                    let state = shared.lock().await;
-                    return state.get_answers(&question_ids);
-                }
-            }
         }
 
-        // Re-check after waking from state_changed
-        let state = shared.lock().await;
-        let result = state.get_answers(&question_ids);
-        if is_resolved(&result, require_all, &state) {
-            return result;
+        // Check condition + capture current generation under AppState lock.
+        //
+        // LOCK ORDER: AppState mutex → gen_lock. notify_state_changed() also
+        // acquires gen_lock while the caller holds AppState. Both sites must
+        // always follow this order — never acquire AppState while holding gen_lock.
+        //
+        // We read gen while holding AppState to ensure atomicity: if a notify
+        // fires between the condition check and the condvar wait, the gen will
+        // have already incremented and the `*gen_guard != saved_gen` check below
+        // will catch it without blocking. Do NOT separate these two lock sites.
+        let saved_gen = {
+            let state = shared.lock().unwrap();
+            // App is shutting down — return whatever we have immediately
+            if state.shutting_down {
+                let mut result = state.get_answers(question_ids);
+                result.shutdown = true;
+                return result;
+            }
+            let result = state.get_answers(question_ids);
+            if is_resolved(&result, require_all, &state.questions) {
+                return result;
+            }
+            let (gen_lock, _) = &*state_changed;
+            *gen_lock.lock().unwrap()
+        }; // AppState released here
+
+        // Wait on condvar until generation changes (or timeout)
+        let (gen_lock, cvar) = &*state_changed;
+        let gen_guard = gen_lock.lock().unwrap();
+
+        if *gen_guard != saved_gen {
+            // A notification fired while we didn't hold gen_lock — re-check immediately
+            continue;
+        }
+
+        match deadline {
+            None => {
+                drop(cvar.wait(gen_guard).unwrap());
+            }
+            Some(d) => {
+                let remaining = d.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    continue;
+                }
+                let _ = cvar.wait_timeout(gen_guard, remaining).unwrap();
+            }
         }
     }
 }
+
