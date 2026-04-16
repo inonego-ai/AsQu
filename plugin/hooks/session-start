@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# SessionStart hook for asqu plugin
+# Returns session_id as additionalContext so Claude can set CLAUDE_SESSION_ID directly
+
+set -euo pipefail
+
+# Read session_id from hook payload (JSON on stdin)
+PAYLOAD=$(cat)
+SESSION_ID=$(printf '%s' "$PAYLOAD" | jq -r '.session_id // empty' 2>/dev/null || true)
+
+if [ -z "$SESSION_ID" ]; then
+    exit 0
+fi
+
+# Escape for JSON embedding
+escape_for_json() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\r'/\\r}"
+    s="${s//$'\t'/\\t}"
+    printf '%s' "$s"
+}
+
+SESSION_ESCAPED=$(escape_for_json "$SESSION_ID")
+CONTEXT="<asqu-session-id>${SESSION_ESCAPED}</asqu-session-id>"
+
+if [ -n "${CURSOR_PLUGIN_ROOT:-}" ]; then
+    printf '{\n  "additional_context": "%s"\n}\n' "$CONTEXT"
+elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -z "${COPILOT_CLI:-}" ]; then
+    printf '{\n  "hookSpecificOutput": {\n    "hookEventName": "SessionStart",\n    "additionalContext": "%s"\n  }\n}\n' "$CONTEXT"
+else
+    printf '{\n  "additionalContext": "%s"\n}\n' "$CONTEXT"
+fi
+
+exit 0

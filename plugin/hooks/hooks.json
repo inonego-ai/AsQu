@@ -2,10 +2,12 @@
   "hooks": {
     "SessionStart": [
       {
+        "matcher": "startup|clear|compact",
         "hooks": [
           {
             "type": "command",
-            "command": "SESSION_ID=$(cat | jq -r '.session_id // empty'); if [ -n \"$SESSION_ID\" ] && [ -n \"$CLAUDE_ENV_FILE\" ] && [ -z \"$CLAUDE_SESSION_ID\" ]; then echo \"export CLAUDE_SESSION_ID=$SESSION_ID\" >> \"$CLAUDE_ENV_FILE\"; fi"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd\" session-start",
+            "async": false
           }
         ]
       }

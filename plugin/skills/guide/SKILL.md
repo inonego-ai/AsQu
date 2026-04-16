@@ -9,6 +9,16 @@ user-invocable: false
 
 Re-read these instructions before first use each session.
 
+## Session Setup
+
+If `<asqu-session-id>` is present in your context (injected by the SessionStart hook), run this **once** immediately before the first asqu command:
+
+```bash
+export CLAUDE_SESSION_ID=<value from asqu-session-id tag>
+```
+
+This ensures all asqu commands (`ask`, `wait`, `get`, `dismiss`) are scoped to the current Claude session automatically.
+
 ## Commands
 
 | Command | Description |
