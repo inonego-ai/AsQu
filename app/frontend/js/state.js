@@ -17,7 +17,17 @@ export const state = {
   sessions: new Map(),       // sessionId -> { id, displayName, createdAt, questionIds }
   sessionOrder: [],          // session IDs in insertion order
   activeSessionId: null,     // currently selected session (null = show all)
+
+  // Loading animation state (sessionId -> dot step 0/1/2)
+  loadingSessions: new Map(),
 };
+
+// ------------------------------------------------------------
+// Dot label for loading animation steps
+// ------------------------------------------------------------
+export function dotLabel(step) {
+  return ['.', '..', '...'][step % 3];
+}
 
 // ============================================================
 // Constants
@@ -55,9 +65,9 @@ export function esc(s) {
     .replace(/"/g, '&quot;');
 }
 
-// ------------------------------------------------------------
+// ---------------------------------------------------------------
 // Convert a timestamp to a human-readable relative time string
-// ------------------------------------------------------------
+// ---------------------------------------------------------------
 export function timeAgo(ts) {
   const diff = Date.now() - ts;
   if (diff < 60000) return 'just now';

@@ -128,8 +128,10 @@ fn build_request(command: &str, args: &CommandArgs, session_id: &str) -> Option<
     match command {
         "ask" => {
             let questions = parse_ask_items(args)?;
+            let display_name = read_ai_title(session_id);
             Some(IpcRequest::Ask {
                 session_id: session_id.to_string(),
+                display_name,
                 questions,
             })
         }
@@ -214,6 +216,69 @@ fn parse_ids(args: &CommandArgs) -> Vec<String> {
         }
     }
     ids
+}
+
+// ============================================================
+// ai-title reading from Claude Code transcript JSONL
+// ============================================================
+
+/// Try to read the ai-title from the Claude Code transcript JSONL for this session.
+/// All I/O errors are silently swallowed — callers must handle None gracefully.
+fn read_ai_title(session_id: &str) -> Option<String> {
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .ok()?;
+
+    let cwd = std::env::current_dir().ok()?;
+    let project_dir = encode_cwd_to_project_dir(&cwd)?;
+
+    let jsonl_path = std::path::Path::new(&home)
+        .join(".claude")
+        .join("projects")
+        .join(&project_dir)
+        .join(format!("{}.jsonl", session_id));
+
+    let content = std::fs::read_to_string(&jsonl_path).ok()?;
+
+    // Return the last ai-title entry (Claude may revise it over the conversation)
+    content
+        .lines()
+        .filter_map(|line| {
+            let v: serde_json::Value = serde_json::from_str(line).ok()?;
+            if v.get("type")?.as_str()? == "ai-title" {
+                v.get("aiTitle")?.as_str().map(|s| s.to_string())
+            } else {
+                None
+            }
+        })
+        .last()
+}
+
+/// Encode current working directory to the Claude Code project directory name.
+/// Rule: lowercase drive + "--" + rest where "/." → "--", "/" → "-", " " → "-".
+fn encode_cwd_to_project_dir(cwd: &std::path::Path) -> Option<String> {
+    let cwd_str = cwd.to_string_lossy();
+    let normalized = cwd_str.replace('\\', "/");
+
+    let encoded = if let Some(colon_pos) = normalized.find(':') {
+        let drive = normalized[..colon_pos].to_lowercase();
+        let rest = &normalized[colon_pos + 1..];
+        let rest_encoded = rest
+            .replace("/.", "--")
+            .replace('/', "-")
+            .replace(' ', "-");
+        let rest_trimmed = rest_encoded.trim_start_matches('-').to_string();
+        format!("{}--{}", drive, rest_trimmed)
+    } else {
+        normalized
+            .replace("/.", "--")
+            .replace('/', "-")
+            .replace(' ', "-")
+            .trim_start_matches('-')
+            .to_string()
+    };
+
+    if encoded.is_empty() { None } else { Some(encoded) }
 }
 
 // ============================================================

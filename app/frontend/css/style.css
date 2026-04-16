@@ -227,6 +227,10 @@ body {
 }
 
 .session-panel-empty {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
   padding: 20px 10px;
   font-size: 11px;
   color: var(--subtext);

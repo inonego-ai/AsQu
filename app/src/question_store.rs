@@ -25,21 +25,34 @@ impl AppState {
     // ------------------------------------------------------------
     // Ensure a session exists; create it if not. Returns display_name.
     // ------------------------------------------------------------
-    pub fn ensure_session(&mut self, session_id: &str) -> String {
-        if !self.sessions.contains_key(session_id) {
-            let display_name = derive_display_name(session_id);
+    pub fn ensure_session(&mut self, session_id: &str, display_name: Option<String>) -> String {
+        if let Some(session) = self.sessions.get_mut(session_id) {
+            // Session exists — update display_name only if a real title arrived.
+            // If the session was consumed and removed by cleanup, this branch is skipped
+            // and we fall through to create a fresh session below (safe).
+            if let Some(name) = display_name {
+                if session.display_name != name {
+                    session.display_name = name.clone();
+                    let _ = self.ipc_to_ui_tx.send(IpcToUiEvent::SessionUpdated {
+                        session: session.clone(),
+                    });
+                }
+            }
+            session.display_name.clone()
+        } else {
+            // Session absent (never created, or cleaned up after all questions resolved).
+            // Create fresh — any in-flight wait/get calls use explicit IDs, so no data loss.
+            let name = display_name.unwrap_or_else(|| derive_display_name(session_id));
             let session = Session {
                 id: session_id.to_string(),
-                display_name: display_name.clone(),
+                display_name: name.clone(),
                 created_at: now_millis(),
                 question_ids: Vec::new(),
             };
             self.sessions.insert(session_id.to_string(), session.clone());
             self.session_order.push(session_id.to_string());
             let _ = self.ipc_to_ui_tx.send(IpcToUiEvent::SessionAdded { session });
-            display_name
-        } else {
-            self.sessions[session_id].display_name.clone()
+            name
         }
     }
 
@@ -120,13 +133,9 @@ impl AppState {
 // ------------------------------------------------------------
 // Derive a short display name from a session ID
 // ------------------------------------------------------------
-fn derive_display_name(session_id: &str) -> String {
-    let chars: Vec<char> = session_id.chars().collect();
-    if chars.len() <= 12 {
-        return session_id.to_string();
-    }
-    // Use last 8 characters as the display name (char-safe, handles multibyte)
-    chars[chars.len() - 8..].iter().collect()
+fn derive_display_name(_session_id: &str) -> String {
+    // Return empty string — UI shows a loading animation until ai-title arrives.
+    String::new()
 }
 
 // ============================================================
@@ -137,8 +146,8 @@ impl AppState {
     // ------------------------------------------------------------
     // Add a question to a session (ensures session exists)
     // ------------------------------------------------------------
-    pub fn add_question_to_session(&mut self, session_id: &str, item: AskItem) -> Question {
-        self.ensure_session(session_id);
+    pub fn add_question_to_session(&mut self, session_id: &str, display_name: Option<String>, item: AskItem) -> Question {
+        self.ensure_session(session_id, display_name);
 
         let id = self.next_id();
 

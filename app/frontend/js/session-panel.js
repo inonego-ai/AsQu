@@ -2,7 +2,7 @@
 // Session Panel Rendering
 // ============================================================
 
-import { state, esc } from './state.js';
+import { state, esc, dotLabel } from './state.js';
 
 function triggerRenderAll() {
   window.dispatchEvent(new CustomEvent('asqu:render-all'));
@@ -34,8 +34,13 @@ export function renderSessionPanel() {
     const pendingCount = Array.from(state.questions.values())
       .filter(q => q.sessionId === sid && q.status === 'pending').length;
 
+    const isPending = !session.displayName;
+    const dotStep   = isPending ? (state.loadingSessions.get(sid) ?? 0) : 0;
+    const nameText  = isPending ? dotLabel(dotStep) : esc(session.displayName);
+    const titleAttr = isPending ? '' : ` title="${esc(session.displayName)}"`;
+
     html += `<div class="session-item${active}" data-sid="${esc(sid)}">
-      <div class="session-item-name" title="${esc(session.displayName)}">${esc(session.displayName)}</div>
+      <div class="session-item-name"${titleAttr}>${nameText}</div>
       ${pendingCount > 0 ? `<div class="session-item-count">${pendingCount}</div>` : ''}
       <button class="session-close" data-close-sid="${esc(sid)}" title="Remove session" aria-label="Remove session">&#10005;</button>
     </div>`;

@@ -77,6 +77,10 @@ pub struct AskItem {
 pub enum IpcRequest {
     Ask {
         session_id: String,
+        /// ai-title read from transcript JSONL on the CLI side before sending.
+        /// None = not yet generated or file unreadable — server keeps existing display_name.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        display_name: Option<String>,
         questions: Vec<AskItem>,
     },
     Wait {

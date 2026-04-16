@@ -49,8 +49,9 @@ fn dispatch(req: IpcRequest, state: &Arc<Mutex<AppState>>) -> IpcResponse {
     match req {
         IpcRequest::Ask {
             session_id,
+            display_name,
             questions,
-        } => handle_ask(state, &session_id, questions),
+        } => handle_ask(state, &session_id, display_name, questions),
 
         IpcRequest::Wait {
             session_id,
@@ -81,13 +82,14 @@ fn dispatch(req: IpcRequest, state: &Arc<Mutex<AppState>>) -> IpcResponse {
 fn handle_ask(
     state: &Arc<Mutex<AppState>>,
     session_id: &str,
+    display_name: Option<String>,
     items: Vec<crate::ipc::types::AskItem>,
 ) -> IpcResponse {
     let mut locked = state.lock().unwrap();
     let count = items.len();
 
     if count == 1 {
-        let question = locked.add_question_to_session(session_id, items.into_iter().next().unwrap());
+        let question = locked.add_question_to_session(session_id, display_name, items.into_iter().next().unwrap());
         locked.emit_question_added(&question);
         IpcResponse::AskOk {
             ids: vec![question.id],
@@ -95,8 +97,10 @@ fn handle_ask(
         }
     } else {
         let mut questions = Vec::with_capacity(count);
+        let mut dn = display_name;
         for item in items {
-            questions.push(locked.add_question_to_session(session_id, item));
+            // Pass display_name only on first question to avoid redundant UI events
+            questions.push(locked.add_question_to_session(session_id, dn.take(), item));
         }
         let ids: Vec<String> = questions.iter().map(|q| q.id.clone()).collect();
         let pending = locked.get_pending_count();

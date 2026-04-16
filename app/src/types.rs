@@ -201,6 +201,9 @@ pub enum IpcToUiEvent {
         /// false = explicit removal (X button), questions should be discarded
         keep_questions: bool,
     },
+    SessionUpdated {
+        session: Session,
+    },
     ShowWindow,
     /// Graceful shutdown: wait for in-flight responses to drain, then exit.
     Shutdown,

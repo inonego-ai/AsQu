@@ -72,6 +72,11 @@ async fn ui_event_listener(
                     "session": session,
                 }));
             }
+            IpcToUiEvent::SessionUpdated { session } => {
+                let _ = app.emit("session_updated", serde_json::json!({
+                    "session": session,
+                }));
+            }
             IpcToUiEvent::SessionRemoved { session_id, keep_questions } => {
                 let _ = app.emit("session_removed", serde_json::json!({
                     "session_id": session_id,

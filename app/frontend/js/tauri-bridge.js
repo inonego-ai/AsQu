@@ -2,8 +2,49 @@
 // Tauri Event Listeners & Initial State Loading
 // ============================================================
 
-import { state } from './state.js';
+import { state, dotLabel } from './state.js';
+
 import { renderAll, renderAllExceptContent } from './app.js';
+
+// ============================================================
+// Loading Animation (for sessions awaiting ai-title)
+// ============================================================
+
+// display_name is empty string when ai-title hasn't arrived yet.
+const UUID_RE = /^$/;
+
+// sessionId → dot step (0='.', 1='..', 2='...') — stored in state for cross-module access
+let animationTimer = null;
+
+function isLoadingName(name) {
+  return UUID_RE.test(name);
+}
+
+
+function startLoadingAnimation(sessionId) {
+  state.loadingSessions.set(sessionId, 0);
+  if (!animationTimer) {
+    animationTimer = setInterval(tickAnimation, 500);
+  }
+}
+
+function stopLoadingAnimation(sessionId) {
+  state.loadingSessions.delete(sessionId);
+  if (state.loadingSessions.size === 0 && animationTimer) {
+    clearInterval(animationTimer);
+    animationTimer = null;
+  }
+}
+
+function tickAnimation() {
+  for (const [sid, step] of state.loadingSessions) {
+    const next = (step + 1) % 3;
+    state.loadingSessions.set(sid, next);
+    // Targeted DOM update — avoid full re-render flicker
+    const el = document.querySelector(`.session-item[data-sid="${sid}"] .session-item-name`);
+    if (el) el.textContent = dotLabel(next);
+  }
+}
 
 // ============================================================
 // Helpers
@@ -63,6 +104,20 @@ export function setupTauriEvents() {
     if (!state.activeSessionId) {
       state.activeSessionId = session.id;
     }
+    // Start loading animation if title not yet available
+    if (isLoadingName(session.displayName)) {
+      startLoadingAnimation(session.id);
+    }
+    renderAll();
+  });
+
+  // Session display_name updated (ai-title arrived)
+  listen('session_updated', (event) => {
+    const { session } = event.payload;
+    const existing = state.sessions.get(session.id);
+    if (!existing) return;
+    existing.displayName = session.displayName;
+    stopLoadingAnimation(session.id);
     renderAll();
   });
 
@@ -113,6 +168,9 @@ export async function loadInitialState() {
         state.sessions.set(s.id, s);
         if (!state.sessionOrder.includes(s.id)) {
           state.sessionOrder.push(s.id);
+        }
+        if (isLoadingName(s.displayName)) {
+          startLoadingAnimation(s.id);
         }
       });
       if (!state.activeSessionId && state.sessionOrder.length > 0) {
