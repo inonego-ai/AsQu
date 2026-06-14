@@ -2,7 +2,8 @@
 name: guide
 description: >
   Async Ask Question Queue — use instead of AskUserQuestion for all user input/decisions.
-  CLI-based: run asqu commands in Bash. Session auto-detected from CLAUDE_SESSION_ID env var.
+  CLI-based: run asqu commands in the active shell. Session auto-detected from
+  CLAUDE_SESSION_ID or CODEX_THREAD_ID env vars.
   NOT for: plain-text question lists or brainstorming.
 user-invocable: false
 ---
@@ -11,11 +12,13 @@ Re-read these instructions before first use each session.
 
 ## Session Setup
 
-If `<asqu-session-id>` is present in your context (injected by the SessionStart hook), export it **once** before the first asqu command:
+Claude Code: if `<asqu-session-id>` is present in your context (injected by the SessionStart hook), export it **once** before the first asqu command:
 
 ```bash
 export CLAUDE_SESSION_ID=<value from asqu-session-id tag>
 ```
+
+Codex: no manual export is normally needed because `CODEX_THREAD_ID` is already available to shell commands.
 
 All asqu commands are then scoped to this session automatically.
 

@@ -16,10 +16,7 @@ use super::types::{IpcRequest, IpcResponse};
 // ----------------------------------------------------------------------------
 // Handle one connected client: read requests in a loop until disconnect.
 // ----------------------------------------------------------------------------
-pub fn handle_connection(
-    mut conn: IpcConnection<NamedPipeTransport>,
-    state: Arc<Mutex<AppState>>,
-) {
+pub fn handle_connection(mut conn: IpcConnection<NamedPipeTransport>, state: Arc<Mutex<AppState>>) {
     loop {
         let json = match conn.receive() {
             Ok(j) => j,
@@ -89,7 +86,11 @@ fn handle_ask(
     let count = items.len();
 
     if count == 1 {
-        let question = locked.add_question_to_session(session_id, display_name, items.into_iter().next().unwrap());
+        let question = locked.add_question_to_session_with_display_name(
+            session_id,
+            display_name,
+            items.into_iter().next().unwrap(),
+        );
         locked.emit_question_added(&question);
         IpcResponse::AskOk {
             ids: vec![question.id],
@@ -100,7 +101,11 @@ fn handle_ask(
         let mut dn = display_name;
         for item in items {
             // Pass display_name only on first question to avoid redundant UI events
-            questions.push(locked.add_question_to_session(session_id, dn.take(), item));
+            questions.push(locked.add_question_to_session_with_display_name(
+                session_id,
+                dn.take(),
+                item,
+            ));
         }
         let ids: Vec<String> = questions.iter().map(|q| q.id.clone()).collect();
         let pending = locked.get_pending_count();
@@ -118,7 +123,11 @@ fn handle_ask(
 // handle_get and handle_dismiss use the locked variant (AppState::resolve_question_ids)
 // to avoid the TOCTOU entirely.
 // ---------------------------------------------------------------------------------------------
-pub(crate) fn resolve_ids(state: &Arc<Mutex<AppState>>, session_id: &str, ids: Vec<String>) -> Vec<String> {
+pub(crate) fn resolve_ids(
+    state: &Arc<Mutex<AppState>>,
+    session_id: &str,
+    ids: Vec<String>,
+) -> Vec<String> {
     if !ids.is_empty() {
         return ids;
     }
@@ -144,11 +153,7 @@ fn handle_wait(
 // Get: non-blocking snapshot of current answer state
 // Single lock acquisition covers both resolve and read — no TOCTOU.
 // -----------------------------------------------------------------------
-fn handle_get(
-    state: &Arc<Mutex<AppState>>,
-    session_id: &str,
-    ids: Vec<String>,
-) -> IpcResponse {
+fn handle_get(state: &Arc<Mutex<AppState>>, session_id: &str, ids: Vec<String>) -> IpcResponse {
     let locked = state.lock().unwrap();
     let effective_ids = locked.resolve_question_ids(session_id, ids);
     let result = locked.get_answers(&effective_ids);
@@ -202,4 +207,3 @@ fn send_response(conn: &mut IpcConnection<NamedPipeTransport>, resp: &IpcRespons
     };
     let _ = conn.send(&json);
 }
-

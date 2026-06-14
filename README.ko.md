@@ -8,7 +8,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/rust-2024_edition-orange.svg?logo=rust" alt="Rust">
   <img src="https://img.shields.io/badge/tauri-2-24C8D8.svg?logo=tauri&logoColor=white" alt="Tauri 2">
-  <img src="https://img.shields.io/badge/claude_code-plugin-8A2BE2.svg" alt="Claude Code Plugin">
+  <img src="https://img.shields.io/badge/claude_code%20%2B%20codex-plugin-8A2BE2.svg" alt="Claude Code and Codex Plugin">
 </p>
 
 <p align="center">
@@ -22,11 +22,11 @@
 
 ## AsQu란?
 
-AsQu는 [Claude Code](https://docs.anthropic.com/en/docs/claude-code)를 위한 비동기 질문 큐입니다. 에이전트가 질문 하나에 막혀 멈추는 대신, 질문들이 영구 실행되는 데스크톱 UI에 쌓이고 사용자가 편할 때 답변할 수 있습니다.
+AsQu는 [Claude Code](https://docs.anthropic.com/en/docs/claude-code)와 Codex 같은 AI 코딩 에이전트를 위한 비동기 질문 큐입니다. 에이전트가 질문 하나에 막혀 멈추는 대신, 질문들이 영구 실행되는 데스크톱 UI에 쌓이고 사용자가 편할 때 답변할 수 있습니다.
 
 - **단일 바이너리** — 인자 없이 실행하면 GUI, 서브커맨드가 있으면 CLI 클라이언트
 - **Named Pipe IPC** — CLI 첫 호출 시 GUI가 백그라운드에서 자동 실행
-- **멀티 세션** — Claude Code 세션마다 UI에 별도 패널로 표시
+- **멀티 세션** — Claude Code 또는 Codex 세션마다 UI에 별도 패널로 표시
 - **자동 정리** — 세션의 모든 질문이 소비되면 세션이 자동으로 제거
 
 ## 설치
@@ -125,14 +125,14 @@ asqu dismiss 3 --reason "더 이상 필요 없음"
 ## 동작 방식
 
 ```
-Claude Code  ──asqu ask──▶  Named Pipe  ──▶  GUI (영구 실행)
+Claude Code / Codex ──asqu ask──▶  Named Pipe  ──▶  GUI (영구 실행)
              ◀─ ids ───────                        │
              ──asqu wait──▶                   사용자 답변
              ◀─ answers ───────────────────────────┘
 ```
 
 1. CLI 첫 호출 시 GUI가 실행 중이 아니면 백그라운드에서 자동 시작.
-2. 세션 ID는 `CLAUDE_SESSION_ID` 환경 변수에서 읽음 (Claude Code가 자동으로 설정).
+2. 세션 ID는 `CLAUDE_SESSION_ID`, `CODEX_THREAD_ID` 같은 에이전트 환경 변수에서 읽음.
 3. `asqu wait`는 사용자가 데스크톱 UI에서 답변할 때까지 블로킹 후 JSON 반환.
 4. 세션의 모든 질문이 답변되거나 취소되면 세션이 자동으로 제거.
 

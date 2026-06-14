@@ -8,7 +8,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/rust-2024_edition-orange.svg?logo=rust" alt="Rust">
   <img src="https://img.shields.io/badge/tauri-2-24C8D8.svg?logo=tauri&logoColor=white" alt="Tauri 2">
-  <img src="https://img.shields.io/badge/claude_code-plugin-8A2BE2.svg" alt="Claude Code Plugin">
+  <img src="https://img.shields.io/badge/claude_code%20%2B%20codex-plugin-8A2BE2.svg" alt="Claude Code and Codex Plugin">
 </p>
 
 <p align="center">
@@ -22,11 +22,11 @@
 
 ## What is AsQu?
 
-AsQu is an async question queue for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Instead of the agent blocking on one question at a time, questions accumulate in a persistent desktop UI and you answer them whenever you're ready.
+AsQu is an async question queue for AI coding agents such as [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and Codex. Instead of the agent blocking on one question at a time, questions accumulate in a persistent desktop UI and you answer them whenever you're ready.
 
 - **Single binary** — no args starts the GUI, subcommands act as a CLI client
 - **Named Pipe IPC** — GUI auto-starts in the background on first CLI call
-- **Multi-session** — each Claude Code session gets its own panel in the UI
+- **Multi-session** — each Claude Code or Codex session gets its own panel in the UI
 - **Auto-cleanup** — sessions disappear once all their questions are answered
 
 ## Installation
@@ -132,7 +132,7 @@ Claude Code  ──asqu ask──▶  Named Pipe  ──▶  GUI (persistent)
 ```
 
 1. First CLI call auto-starts the GUI in the background if it isn't running.
-2. Session ID is read from `CLAUDE_SESSION_ID` env var (set automatically by Claude Code).
+2. Session ID is read from agent environment variables such as `CLAUDE_SESSION_ID` or `CODEX_THREAD_ID`.
 3. `asqu wait` blocks until the user answers in the desktop UI, then returns JSON.
 4. Once all questions in a session are answered or dismissed, the session is removed automatically.
 

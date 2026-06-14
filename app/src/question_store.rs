@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::ipc::types::AskItem;
-use crate::state::{now_millis, AppState, SharedState};
+use crate::state::{AppState, SharedState, now_millis};
 use crate::types::{
     AnswerInfo, DeniedInfo, GetAnswersResult, IpcToUiEvent, Question, QuestionAnswer,
     QuestionStatus, Session,
@@ -25,7 +25,16 @@ impl AppState {
     // ------------------------------------------------------------
     // Ensure a session exists; create it if not. Returns display_name.
     // ------------------------------------------------------------
-    pub fn ensure_session(&mut self, session_id: &str, display_name: Option<String>) -> String {
+    #[cfg(test)]
+    pub fn ensure_session(&mut self, session_id: &str) -> String {
+        self.ensure_session_with_display_name(session_id, None)
+    }
+
+    pub fn ensure_session_with_display_name(
+        &mut self,
+        session_id: &str,
+        display_name: Option<String>,
+    ) -> String {
         if let Some(session) = self.sessions.get_mut(session_id) {
             // Session exists — update display_name only if a real title arrived.
             // If the session was consumed and removed by cleanup, this branch is skipped
@@ -49,9 +58,12 @@ impl AppState {
                 created_at: now_millis(),
                 question_ids: Vec::new(),
             };
-            self.sessions.insert(session_id.to_string(), session.clone());
+            self.sessions
+                .insert(session_id.to_string(), session.clone());
             self.session_order.push(session_id.to_string());
-            let _ = self.ipc_to_ui_tx.send(IpcToUiEvent::SessionAdded { session });
+            let _ = self
+                .ipc_to_ui_tx
+                .send(IpcToUiEvent::SessionAdded { session });
             name
         }
     }
@@ -86,7 +98,8 @@ impl AppState {
 
         // Dismiss pending questions so wait_for_answers_sync unblocks immediately.
         // Questions are kept in state (not deleted) for in-flight wait callers.
-        let pending_ids: Vec<String> = self.questions
+        let pending_ids: Vec<String> = self
+            .questions
             .values()
             .filter(|q| q.session_id == session_id && q.status == QuestionStatus::Pending)
             .map(|q| q.id.clone())
@@ -106,7 +119,8 @@ impl AppState {
     // Called automatically after any state-changing operation.
     // ------------------------------------------------------------
     fn cleanup_consumed_sessions(&mut self) {
-        let consumed: Vec<String> = self.session_order
+        let consumed: Vec<String> = self
+            .session_order
             .iter()
             .filter(|sid| {
                 if let Some(session) = self.sessions.get(*sid) {
@@ -133,9 +147,14 @@ impl AppState {
 // ------------------------------------------------------------
 // Derive a short display name from a session ID
 // ------------------------------------------------------------
-fn derive_display_name(_session_id: &str) -> String {
-    // Return empty string — UI shows a loading animation until ai-title arrives.
-    String::new()
+fn derive_display_name(session_id: &str) -> String {
+    if session_id.chars().count() <= 12 {
+        return session_id.to_string();
+    }
+
+    let mut chars: Vec<char> = session_id.chars().rev().take(8).collect();
+    chars.reverse();
+    chars.into_iter().collect()
 }
 
 // ============================================================
@@ -146,8 +165,18 @@ impl AppState {
     // ------------------------------------------------------------
     // Add a question to a session (ensures session exists)
     // ------------------------------------------------------------
-    pub fn add_question_to_session(&mut self, session_id: &str, display_name: Option<String>, item: AskItem) -> Question {
-        self.ensure_session(session_id, display_name);
+    #[cfg(test)]
+    pub fn add_question_to_session(&mut self, session_id: &str, item: AskItem) -> Question {
+        self.add_question_to_session_with_display_name(session_id, None, item)
+    }
+
+    pub fn add_question_to_session_with_display_name(
+        &mut self,
+        session_id: &str,
+        display_name: Option<String>,
+        item: AskItem,
+    ) -> Question {
+        self.ensure_session_with_display_name(session_id, display_name);
 
         let id = self.next_id();
 
@@ -315,7 +344,8 @@ impl AppState {
         if !from_session.is_empty() {
             return from_session;
         }
-        let mut fallback: Vec<String> = self.questions
+        let mut fallback: Vec<String> = self
+            .questions
             .values()
             .filter(|q| q.session_id == session_id)
             .map(|q| q.id.clone())
@@ -365,9 +395,11 @@ fn is_resolved(
     questions: &std::collections::HashMap<String, crate::types::Question>,
 ) -> bool {
     // If any answered question is marked instant, resolve immediately
-    if result.answered.iter().any(|a| {
-        questions.get(&a.id).map(|q| q.instant).unwrap_or(false)
-    }) {
+    if result
+        .answered
+        .iter()
+        .any(|a| questions.get(&a.id).map(|q| q.instant).unwrap_or(false))
+    {
         return true;
     }
 
@@ -461,4 +493,3 @@ pub fn wait_for_answers_sync(
         }
     }
 }
-

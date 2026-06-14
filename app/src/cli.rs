@@ -8,8 +8,8 @@ use inocli::{ArgParser, CommandArgs, CommandInfo, CommandRegistry};
 use inoipc::IpcConnection;
 use inoipc::transport::NamedPipeTransport;
 
-use crate::ipc::types::{AskItem, IpcRequest};
 use crate::ipc::server::PIPE_NAME;
+use crate::ipc::types::{AskItem, IpcRequest};
 
 // ============================================================
 // Entry point for CLI mode
@@ -128,7 +128,7 @@ fn build_request(command: &str, args: &CommandArgs, session_id: &str) -> Option<
     match command {
         "ask" => {
             let questions = parse_ask_items(args)?;
-            let display_name = read_ai_title(session_id);
+            let display_name = read_agent_title(session_id);
             Some(IpcRequest::Ask {
                 session_id: session_id.to_string(),
                 display_name,
@@ -188,7 +188,9 @@ fn build_request(command: &str, args: &CommandArgs, session_id: &str) -> Option<
 
 fn parse_ask_items(args: &CommandArgs) -> Option<Vec<AskItem>> {
     let Some(first) = args.get(0) else {
-        eprintln!("asqu ask: argument must be a JSON array (e.g. '[{{\"text\":\"Q?\",\"choices\":[\"A\",\"B\"]}}]')");
+        eprintln!(
+            "asqu ask: argument must be a JSON array (e.g. '[{{\"text\":\"Q?\",\"choices\":[\"A\",\"B\"]}}]')"
+        );
         return None;
     };
 
@@ -219,12 +221,17 @@ fn parse_ids(args: &CommandArgs) -> Vec<String> {
 }
 
 // ============================================================
-// ai-title reading from Claude Code transcript JSONL
+// Session display-name resolution
 // ============================================================
 
-/// Try to read the ai-title from the Claude Code transcript JSONL for this session.
+/// Try to resolve a human-readable title for the active agent session.
 /// All I/O errors are silently swallowed — callers must handle None gracefully.
-fn read_ai_title(session_id: &str) -> Option<String> {
+fn read_agent_title(session_id: &str) -> Option<String> {
+    read_claude_ai_title(session_id).or_else(|| read_codex_display_name(session_id))
+}
+
+/// Try to read the ai-title from the Claude Code transcript JSONL for this session.
+fn read_claude_ai_title(session_id: &str) -> Option<String> {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .ok()?;
@@ -254,6 +261,27 @@ fn read_ai_title(session_id: &str) -> Option<String> {
         .last()
 }
 
+/// Codex currently exposes CODEX_THREAD_ID but does not provide a transcript
+/// title path equivalent to Claude's ai-title JSONL. Use a stable short label
+/// instead so the UI does not stay in the loading-title state forever.
+fn read_codex_display_name(session_id: &str) -> Option<String> {
+    for var in &["CODEX_THREAD_ID", "CODEX_SESSION_ID"] {
+        let Ok(val) = std::env::var(var) else {
+            continue;
+        };
+        if val == session_id {
+            return Some(format!("Codex {}", last_chars(session_id, 8)));
+        }
+    }
+    None
+}
+
+fn last_chars(value: &str, count: usize) -> String {
+    let mut chars: Vec<char> = value.chars().rev().take(count).collect();
+    chars.reverse();
+    chars.into_iter().collect()
+}
+
 /// Encode current working directory to the Claude Code project directory name.
 /// Rule: lowercase drive + "--" + rest where "/." → "--", "/" → "-", " " → "-".
 fn encode_cwd_to_project_dir(cwd: &std::path::Path) -> Option<String> {
@@ -263,10 +291,7 @@ fn encode_cwd_to_project_dir(cwd: &std::path::Path) -> Option<String> {
     let encoded = if let Some(colon_pos) = normalized.find(':') {
         let drive = normalized[..colon_pos].to_lowercase();
         let rest = &normalized[colon_pos + 1..];
-        let rest_encoded = rest
-            .replace("/.", "--")
-            .replace('/', "-")
-            .replace(' ', "-");
+        let rest_encoded = rest.replace("/.", "--").replace('/', "-").replace(' ', "-");
         let rest_trimmed = rest_encoded.trim_start_matches('-').to_string();
         format!("{}--{}", drive, rest_trimmed)
     } else {
@@ -278,7 +303,11 @@ fn encode_cwd_to_project_dir(cwd: &std::path::Path) -> Option<String> {
             .to_string()
     };
 
-    if encoded.is_empty() { None } else { Some(encoded) }
+    if encoded.is_empty() {
+        None
+    } else {
+        Some(encoded)
+    }
 }
 
 // ============================================================
@@ -292,7 +321,13 @@ fn get_session_id(args: &CommandArgs) -> String {
     }
 
     // Try environment variables in priority order
-    for var in &["CLAUDE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "ANTHROPIC_SESSION_ID"] {
+    for var in &[
+        "CLAUDE_SESSION_ID",
+        "CLAUDE_CODE_SESSION_ID",
+        "ANTHROPIC_SESSION_ID",
+        "CODEX_THREAD_ID",
+        "CODEX_SESSION_ID",
+    ] {
         if let Ok(val) = std::env::var(var) {
             if !val.is_empty() {
                 return val;
